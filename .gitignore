@@ -4,3 +4,10 @@ dist/
 .dev.vars
 *.local
 .DS_Store
+
+coverage/
+.vitest/
+playwright-report/
+blob-report/
+test-results/
+*.tsbuildinfo
