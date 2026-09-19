@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BakiHai — Notebook vs Whiteboard</title>
+<style>
+  :root {
+    --paper: #faf6ee;
+    --card: #ffffff;
+    --ink: #1c2431;
+    --muted: #5b6674;
+    --line: #e6ddcc;
+    --amber: #b45309;
+    --amber-bg: #fef3c7;
+    --green: #166534;
+    --green-bg: #dcfce7;
+    --red: #9f1239;
+    --red-bg: #ffe4e6;
+    --blue: #1e40af;
+    --blue-bg: #dbeafe;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 32px 20px 72px; }
+  header h1 { font-size: clamp(26px, 5vw, 40px); line-height: 1.1; margin: 0 0 8px; letter-spacing: -0.02em; }
+  header p.lede { font-size: clamp(16px, 2.4vw, 19px); color: var(--muted); margin: 0 0 6px; max-width: 760px; }
+  .kicker { display: inline-block; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--amber); font-weight: 700; margin-bottom: 10px; }
+  section { margin-top: 48px; }
+  h2 { font-size: clamp(20px, 3.4vw, 26px); margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 + p.sub { color: var(--muted); margin: 0 0 20px; max-width: 780px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 18px 16px;
+  }
+  .card h3 { margin: 0 0 10px; font-size: 17px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; margin-bottom: 10px; }
+  .tag.bad { background: var(--red-bg); color: var(--red); }
+  .tag.good { background: var(--green-bg); color: var(--green); }
+  .tag.info { background: var(--blue-bg); color: var(--blue); }
+  .tag.warn { background: var(--amber-bg); color: var(--amber); }
+  code, .ev { font-family: var(--mono); font-size: 12.5px; }
+  .ev {
+    display: block;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 7px 10px;
+    margin: 5px 0;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .ev .dim { color: #94a3b8; }
+  .ev .ok { color: #86efac; }
+  .ev .warn { color: #fcd34d; }
+  .card p { margin: 8px 0; }
+  .card p:last-child { margin-bottom: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13.5px; }
+  .flow {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    margin: 18px 0;
+  }
+  .flow .box {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px; text-align: center; font-size: 13.5px; font-weight: 600;
+  }
+  .flow .box small { display: block; font-weight: 400; color: var(--muted); margin-top: 3px; }
+  .flow .arrow { text-align: center; color: var(--amber); font-weight: 700; font-size: 13px; }
+  .flow .arrow small { display: block; color: var(--muted); font-weight: 500; font-size: 11px; }
+  @media (max-width: 720px) {
+    .flow { grid-template-columns: 1fr; }
+    .flow .arrow { transform: rotate(90deg); }
+  }
+  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px; }
+  .lane { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .lane h4 { margin: 0 0 4px; font-size: 14px; }
+  .lane .who { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .stamp { font-size: 11px; color: var(--muted); }
+  .callout {
+    border-left: 4px solid var(--amber);
+    background: #fff8e8;
+    border-radius: 0 12px 12px 0;
+    padding: 14px 16px;
+    margin: 16px 0;
+    font-size: 14.5px;
+  }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #eef1f5; color: var(--ink); border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f4efe3; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  .yes { color: var(--green); font-weight: 700; }
+  .no { color: var(--red); font-weight: 700; }
+  .meh { color: var(--amber); font-weight: 700; }
+  footer { margin-top: 56px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <span class="kicker">BakiHai — architecture explainer</span>
+  <h1>It's a notebook, not a whiteboard</h1>
+  <p class="lede">Same week of dinners, eggs and UPI payments. Two ways to build the app. One of them survives the metro with no signal.</p>
+</header>
+
+<section>
+  <h2>1. The same dinner, stored two ways</h2>
+  <p class="sub">You pay ₹900 for dinner for you, Rohan and Priya. Watch what the app actually stores.</p>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag bad">Normal app — CRUD</span>
+      <h3>Stores the <em>current state</em></h3>
+      <span class="ev">bills(id: 1, what: "Dinner", amount: 900,
+      settled: <span class="warn">false</span>)</span>
+      <p class="small">When Priya pays you back, the app <strong>overwrites</strong> the row:</p>
+      <span class="ev">UPDATE bills SET settled = <span class="ok">true</span>
+  -- the old value is gone forever</span>
+      <p class="small muted">“Who marked this settled, and when?” — the app no longer knows. If you want to know, you build an audit log as a second system.</p>
+    </div>
+    <div class="card">
+      <span class="tag good">BakiHai — event log</span>
+      <h3>Stores <em>what happened</em></h3>
+      <span class="ev"><span class="dim">#a1</span> You     paid ₹900  "Dinner" split 3
+<span class="dim">#a2</span> Rohan   borrowed 3 eggs from You
+<span class="dim">#a3</span> Rohan   returned 1 egg  to You
+<span class="dim">#a4</span> Priya   paid ₹300 to You (UPI)
+<span class="dim">#a5</span> You     confirmed #a4 <span class="ok">✓</span></span>
+      <p class="small">Lines are never changed. A new fact is a <strong>new line</strong>. Your balance screen is just arithmetic over the whole notebook.</p>
+      <p class="small muted">Want to know who settled what, when? It's line #a5, forever.</p>
+    </div>
+  </div>
+  <div class="callout">
+    <strong>Why "append-only"?</strong> Because that's how ledgers have worked since before computers: you don't erase an entry, you add a correction entry. Git, bank statements, accounting books — all append-only. The rules feel unusual only because most apps quietly mutate data and lose the trail.
+  </div>
+</section>
+
+<section>
+  <h2>2. The metro test — where CRUD breaks and the notebook doesn't</h2>
+  <p class="sub">Both phones are offline in the metro. Both people act on the same dinner bill. Then everyone reconnects.</p>
+  <div class="lanes">
+    <div class="lane">
+      <h4>You (offline)</h4>
+      <div class="who">Tap: “Priya settled her ₹300”</div>
+      <span class="ev">intent: settled = true</span>
+    </div>
+    <div class="lane">
+      <h4>Rohan (offline)</h4>
+      <div class="who">Fixes the bill: “we also ordered chicken, ₹1050 total”</div>
+      <span class="ev">intent: amount = 1050</span>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:14px">
+    <div class="card">
+      <span class="tag bad">CRUD on reconnect</span>
+      <span class="ev">You save →   settled: true,  amount: 900
+Rohan saves → settled: false, amount: 1050
+<span class="warn">…one of these silently overwrites the other.</span></span>
+      <p class="small">This is called <strong>last-write-wins</strong>. Someone's money quietly disappears. To fix it properly you need locks, conflict dialogs, or a server that serialises every edit — i.e. you start building a distributed database to avoid losing data.</p>
+    </div>
+    <div class="card">
+      <span class="tag good">Notebook on reconnect</span>
+      <span class="ev"><span class="dim">#a6</span> You     confirmed Priya paid ₹300
+<span class="dim">#a7</span> Rohan   corrected dinner total to ₹1050</span>
+      <p class="small">Two <strong>new lines</strong>. Nothing is overwritten, so there is nothing to resolve. The balance recalculates from the whole notebook and both facts are respected. Merge conflict code: zero.</p>
+      <p class="small muted">Two people can't conflict on a line that doesn't exist yet — it's a group chat, not a shared Google Doc.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>3. How one line travels to your friends</h2>
+  <p class="sub">Your phone never talks directly to their phone. Neither does it ask a server for the balance. It drops a sealed envelope on a noticeboard.</p>
+  <div class="flow">
+    <div class="box">Your phone<small>full notebook + sealed envelope</small></div>
+    <div class="arrow">→<small>posts</small></div>
+    <div class="box">Noticeboard<small>Cloudflare relay — holds sealed envelopes only</small></div>
+    <div class="arrow">→<small>pulls</small></div>
+    <div class="box">Rohan's phone<small>checks stamp, unseals, appends the line</small></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag info">What the noticeboard can see</span>
+      <p class="small">That 6 envelopes arrived, their timing and size, and the room's name. It's a postman counting letters.</p>
+      <div class="pill-row">
+        <span class="pill">timing</span><span class="pill">size</span><span class="pill">count</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="tag info">What it can never see</span>
+      <p class="small">Amounts, names, items, notes or who paid — the contents are sealed with your group's key, which only group members' phones hold.</p>
+      <div class="pill-row">
+        <span class="pill">₹ amounts</span><span class="pill">people</span><span class="pill">eggs</span><span class="pill">notes</span>
+      </div>
+    </div>
+  </div>
+  <div class="callout">
+    The relay is a <strong>mailbox, not a database</strong>. It never computes balances, never runs rules, never “owns” your data. If it dies, every phone still has the complete notebook and sync resumes later. Phone lost? It redownloads all envelopes and rebuilds everything. This is also why there is no login: your device has a key, an invite link carries the group's secret, and that's the whole account system.
+  </div>
+</section>
+
+<section>
+  <h2>4. Why this is genuinely better for <em>this</em> app</h2>
+  <div class="grid3">
+    <div class="card">
+      <h3>Offline is the default</h3>
+      <p class="small">The app reads and writes your phone's copy. No loading spinners, no “can't reach server”, works in the metro, on a train, on flight mode.</p>
+    </div>
+    <div class="card">
+      <h3>Restore = replay</h3>
+      <p class="small">A new phone rebuilds the whole book by replaying envelopes. Backup isn't a special feature — it's the architecture.</p>
+    </div>
+    <div class="card">
+      <h3>Privacy by construction</h3>
+      <p class="small">Even the host (Cloudflare) can't read your money life. This isn't a privacy policy promise; it's math.</p>
+    </div>
+    <div class="card">
+      <h3>No login, no accounts DB</h3>
+      <p class="small">Invite link + device stamp. The most bug-prone, most phished part of a normal app simply doesn't exist here.</p>
+    </div>
+    <div class="card">
+      <h3>Costs nothing, scales with friends</h3>
+      <p class="small">Free relay tier covers a group like yours by orders of magnitude. No server bill, no “free trial” cliff.</p>
+    </div>
+    <div class="card">
+      <h3>New features are cheap</h3>
+      <p class="small">A new feature is a new line type. Old app versions ignore unknown lines instead of crashing — like adding a new emoji to a chat.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>5. The honest costs — and why each one exists</h2>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag warn">Cost 01 — Compaction</span>
+      <p class="small">A notebook that only gains lines gets heavy. At ~10,000 lines it's still only a few megabytes, but the sync engine also keeps small traces of removed lines. <strong>Why:</strong> that's the price of never losing history. <strong>Fix:</strong> every ~2,000 lines we fold old ones into a “closing balance” checkpoint, exactly like accounting closes a month. One-time feature, then automatic.</p>
+    </div>
+    <div class="card">
+      <span class="tag warn">Cost 02 — Metadata is visible</span>
+      <p class="small">The relay sees <em>that</em> envelopes moved, and when. <strong>Why:</strong> routing letters requires seeing the envelopes. <strong>Fix:</strong> contents stay sealed; only timing/size/count leak. Acceptable for a friend group, documented in the ADR.</p>
+    </div>
+    <div class="card">
+      <span class="tag warn">Cost 03 — A removed member keeps old history</span>
+      <p class="small">If someone leaves (or is removed), they already downloaded earlier envelopes and can still read those. <strong>Why:</strong> you can't un-send a letter someone already read. <strong>Fix:</strong> rotate the group key so all <em>future</em> lines are unreadable to them. True eviction means re-encrypting all history — overkill for friends, and we'll say so in the ADR.</p>
+    </div>
+    <div class="card">
+      <span class="tag warn">Cost 04 — No accounts means link-holders can write</span>
+      <p class="small">Anyone who has the group link can push junk lines. Encryption protects secrecy, not availability. <strong>Why:</strong> we traded accounts for zero-login. <strong>Fix:</strong> a long random secret in the link, signed lines, size/rate caps at the relay.</p>
+    </div>
+    <div class="card">
+      <span class="tag warn">Cost 05 — More upfront work than CRUD</span>
+      <p class="small">The sync layer is real work. <strong>Why we still choose it:</strong> the alternative isn't free either — a normal app still needs an API, auth, a database, backups, and <em>still</em> breaks in the metro. We pay once, upfront; CRUD pays forever, in infrastructure and lost edits.</p>
+    </div>
+    <div class="card">
+      <span class="tag warn">Cost 06 — Balance is computed, not stored</span>
+      <p class="small">Every balance is arithmetic over the lines. <strong>Why:</strong> a computed balance can't drift out of sync with the facts. <strong>Scale check:</strong> even 10,000 lines replays in a few milliseconds on a phone. Non-issue for a friend group.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>6. The straight comparison</h2>
+  <table>
+    <thead>
+      <tr><th></th><th>Normal app (CRUD)</th><th>BakiHai (event log + relay)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Works offline</td><td class="no">No — or a queue you must build</td><td class="yes">Yes — by default</td></tr>
+      <tr><td>Two people edit at once</td><td class="no">Last write wins — silent data loss</td><td class="yes">Both become lines — nothing lost</td></tr>
+      <tr><td>Who can read your data</td><td class="no">Whoever runs the server</td><td class="yes">Only group phones (encrypted)</td></tr>
+      <tr><td>History / audit trail</td><td class="meh">Only if built separately</td><td class="yes">It <em>is</em> the data</td></tr>
+      <tr><td>Login needed</td><td class="no">Yes, plus password resets</td><td class="yes">No — invite link + device key</td></tr>
+      <tr><td>Server owns your data</td><td class="no">Yes (single point of truth)</td><td class="yes">No — phones do; relay is a mailbox</td></tr>
+      <tr><td>Hosting cost</td><td class="meh">Free tier with pauses/sleeps</td><td class="yes">Free tier, always available</td></tr>
+      <tr><td>Upside</td><td class="meh">Simplest possible code</td><td class="yes">Offline, private, portable, conflict-free</td></tr>
+      <tr><td>Cost</td><td class="meh">Server, API, auth, backups</td><td class="meh">Sync layer + compaction discipline</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  BakiHai — the book lives on every phone, the noticeboard only holds sealed envelopes, and the balance is the arithmetic of everything that ever happened.
+</footer>
+
+</div>
+</body>
+</html>
