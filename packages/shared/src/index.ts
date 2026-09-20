@@ -46,6 +46,16 @@ export {
   unsignedEntryEnvelopeSchema,
   verifyEntryEnvelope,
 } from './entry-envelope'
+export { type Balance, foldBalances } from './group/balances'
+export {
+  type CreateExpenseEntryInput,
+  createExpenseEntry,
+  EXPENSE_ENTRY_TYPE,
+  type ExpenseEntryPayload,
+  type ExpenseShare,
+  expenseEntryPayloadSchema,
+  splitExpense,
+} from './group/expenses'
 export {
   buildInviteUrl,
   decodeInvite,
@@ -66,6 +76,7 @@ export {
   type MemberEntryPayload,
   memberEntryPayloadSchema,
 } from './group/members'
+export { formatPaiseAsRupees, parseRupeesToPaise } from './money'
 export {
   frameForSealedUpdate,
   MAX_SEALED_UPDATE_CHARS,

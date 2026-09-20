@@ -4,7 +4,9 @@ import {
   MEMBER_ENTRY_TYPE,
   type SyncStatus,
 } from '@bakihai/shared'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { AddExpenseForm } from '../book/AddExpenseForm'
+import { describeBalance, describeEntry, formatOccurredAt } from '../book/summaries'
 import { useBook } from '../book/useBook'
 import { type Identity, inviteForIdentity, loadIdentity } from '../identity/identity'
 
@@ -14,20 +16,19 @@ const SYNC_LABELS: Record<SyncStatus, string> = {
   disconnected: 'Offline',
 }
 
-function formatOccurredAt(occurredAt: string): string {
-  const date = new Date(occurredAt)
-
-  if (Number.isNaN(date.getTime())) {
-    return occurredAt
+function compareTextDesc(left: string, right: string): number {
+  if (left < right) {
+    return 1
   }
 
-  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return left > right ? -1 : 0
 }
 
 /**
- * The book of the Group this device belongs to: its Members, its Entries, and
- * the invite action. Entries are read from the local copy, so the screen is
- * instant with no network (ADR-0001).
+ * The book of the Group this device belongs to: its Members, its Balances, the
+ * Add Expense form, its Entries newest first, and the invite action. Everything
+ * is read from the local copy, so the screen is instant with no network
+ * (ADR-0001) and Balances are folded, never stored (ADR-0004).
  */
 export function BookPage() {
   const [identity] = useState(loadIdentity)
@@ -40,17 +41,31 @@ export function BookPage() {
 }
 
 function BookScreen({ identity }: { identity: Identity }) {
-  const { entries, members, status, error } = useBook(identity)
+  const { entries, members, balances, status, error, writeExpense } = useBook(identity)
   const inviteUrl = buildInviteUrl(window.location.origin, inviteForIdentity(identity))
   const [copied, setCopied] = useState(false)
   // The book arrives from other devices, so treat it as untrusted: show only
   // Entries this app version knows how to render (#8 hardens ingest).
-  const ledgerEntries = entries
-    .filter(
-      (entry: EntryEnvelope) =>
-        entry.type !== MEMBER_ENTRY_TYPE && typeof entry.occurredAt === 'string',
-    )
-    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+  const ledgerEntries = useMemo(
+    () =>
+      entries
+        .filter(
+          (entry: EntryEnvelope) =>
+            entry.type !== MEMBER_ENTRY_TYPE && typeof entry.occurredAt === 'string',
+        )
+        .sort(
+          (left, right) =>
+            compareTextDesc(left.occurredAt, right.occurredAt) ||
+            compareTextDesc(left.id, right.id),
+        ),
+    [entries],
+  )
+  const memberIds = useMemo(() => new Set(members.map((member) => member.deviceId)), [members])
+  // Balances are between Members; anything else in the book is not this
+  // Group's business until ingest verification lands (#8).
+  const visibleBalances = balances.filter(
+    (balance) => memberIds.has(balance.debtorDeviceId) && memberIds.has(balance.creditorDeviceId),
+  )
 
   async function copyInvite(): Promise<void> {
     try {
@@ -96,6 +111,35 @@ function BookScreen({ identity }: { identity: Identity }) {
         </ul>
       </section>
 
+      <section className="flex flex-col gap-2" aria-labelledby="balances-heading">
+        <h2 id="balances-heading" className="font-semibold text-lg">
+          Balances
+        </h2>
+        {visibleBalances.length === 0 ? (
+          <p data-testid="no-balances" className="text-muted-foreground">
+            No balances.
+          </p>
+        ) : (
+          <ul data-testid="balance-list" className="flex flex-col gap-1">
+            {visibleBalances.map((balance) => (
+              <li
+                key={`${balance.debtorDeviceId}/${balance.creditorDeviceId}`}
+                data-balance-debtor={balance.debtorDeviceId}
+                data-balance-creditor={balance.creditorDeviceId}
+              >
+                {describeBalance(balance, members, identity.deviceId)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <AddExpenseForm
+        members={members}
+        viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
+        onSubmit={writeExpense}
+      />
+
       <section className="flex flex-col gap-2" aria-labelledby="entries-heading">
         <h2 id="entries-heading" className="font-semibold text-lg">
           Entries
@@ -106,9 +150,8 @@ function BookScreen({ identity }: { identity: Identity }) {
           <ul data-testid="entry-list" className="flex flex-col gap-1">
             {ledgerEntries.map((entry) => (
               <li key={entry.id} data-entry-id={entry.id} data-entry-type={entry.type}>
-                <span className="font-medium capitalize">{entry.type}</span>
-                <span className="text-muted-foreground">
-                  {' · '}
+                <span className="font-medium">{describeEntry(entry, members)}</span>
+                <span className="block text-muted-foreground text-sm">
                   {formatOccurredAt(entry.occurredAt)}
                 </span>
               </li>

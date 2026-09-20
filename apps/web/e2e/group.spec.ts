@@ -1,32 +1,7 @@
-import { expect, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { createGroup, joinGroup, memberNames } from './helpers'
 
 const HARNESS_PATH = '/e2e/harness/harness.html'
-
-async function createGroup(page: Page, groupName: string, displayName: string): Promise<string> {
-  await page.goto('/')
-  await expect(page).toHaveURL(/\/welcome$/)
-  await page.getByLabel('Group name').fill(groupName)
-  await page.getByLabel('Your name').fill(displayName)
-  await page.getByRole('button', { name: 'Create group' }).click()
-  await expect(page.getByRole('heading', { name: groupName })).toBeVisible()
-  await expect(page.getByTestId('sync-status')).toHaveAttribute('data-status', 'connected')
-
-  return page.getByLabel('Invite link').inputValue()
-}
-
-async function joinGroup(page: Page, inviteUrl: string, displayName: string): Promise<void> {
-  await page.goto(inviteUrl)
-  await page.getByLabel('Your name').fill(displayName)
-  await page.getByRole('button', { name: 'Join group' }).click()
-  await expect(page.getByLabel('Invite link')).toBeVisible()
-}
-
-function memberNames(page: Page): Promise<string[]> {
-  return page
-    .getByTestId('member-list')
-    .locator('li')
-    .evaluateAll((items) => items.map((item) => item.getAttribute('data-member-name') ?? ''))
-}
 
 test('the creator lands on an empty book with an invite action', async ({ page }) => {
   const invite = await createGroup(page, 'Flat 3B', 'Rohan')

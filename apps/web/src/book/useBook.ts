@@ -1,7 +1,9 @@
 import {
+  type Balance,
   type BookSyncProvider,
   type EntryEnvelope,
   entriesMap,
+  foldBalances,
   foldMembers,
   type Member,
   readEntries,
@@ -10,16 +12,20 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import type * as Y from 'yjs'
 import type { Identity } from '../identity/identity'
-import { getBookSession } from './session'
+import { type ExpenseDraft, getBookSession } from './session'
 
 export interface BookView {
   /** Every Entry in the book, in no particular order. */
   entries: EntryEnvelope[]
   /** The Group roster folded from the book's Member Entries. */
   members: Member[]
+  /** Pairwise Balances folded from the book's Expense Entries, zeroes already gone. */
+  balances: Balance[]
   status: SyncStatus
   /** Set when this device's identity or book could not be opened. */
   error: unknown
+  /** Signs and writes an Expense to the local book. */
+  writeExpense(input: ExpenseDraft): Promise<void>
 }
 
 /** Reads the local book, re-rendering whenever it changes on this or another device. */
@@ -44,8 +50,9 @@ export function useBook(identity: Identity): BookView {
   }, [session])
 
   const members = useMemo(() => foldMembers(entries), [entries])
+  const balances = useMemo(() => foldBalances(entries), [entries])
 
-  return { entries, members, status, error }
+  return { entries, members, balances, status, error, writeExpense: session.writeExpense }
 }
 
 function useEntries(doc: Y.Doc): EntryEnvelope[] {

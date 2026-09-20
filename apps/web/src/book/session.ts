@@ -1,6 +1,7 @@
 import {
   BookSyncProvider,
   createBookDoc,
+  createExpenseEntry,
   createMemberEntry,
   fromBase64Url,
   MEMBER_ENTRY_TYPE,
@@ -12,6 +13,13 @@ import type * as Y from 'yjs'
 import { type Identity, importDeviceSigningKey } from '../identity/identity'
 import { persistBook } from './persistence'
 
+/** The fields an Add Expense form decides; the session signs and writes the Entry. */
+export interface ExpenseDraft {
+  amountPaise: number
+  payerDeviceId: string
+  participantDeviceIds: string[]
+}
+
 /** One Group's live book: the document, its local copy, and its relay connection. */
 export interface BookSession {
   doc: Y.Doc
@@ -19,6 +27,8 @@ export interface BookSession {
   provider: BookSyncProvider
   /** Resolves once this device's own Member Entry is in the local book. */
   ready: Promise<void>
+  /** Signs and writes an Expense to the local book; it syncs like any other Entry. */
+  writeExpense(input: ExpenseDraft): Promise<void>
 }
 
 let current: { groupId: string; session: BookSession } | null = null
@@ -52,12 +62,35 @@ function createBookSession(identity: Identity): BookSession {
     room: identity.groupId,
     relayUrl: identity.relayUrl,
   })
+  const deviceKey = memoizedDeviceKey(identity)
 
   return {
     doc,
     persistence,
     provider,
-    ready: ensureOwnMemberEntry(doc, persistence, identity),
+    ready: ensureOwnMemberEntry(doc, persistence, identity, deviceKey),
+    async writeExpense(input) {
+      const privateKey = await deviceKey()
+      const entry = await createExpenseEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        ...input,
+      })
+
+      putEntry(doc, entry)
+    },
+  }
+}
+
+/** Imports this device's signing key once per session, however many Entries it writes. */
+function memoizedDeviceKey(identity: Identity): () => Promise<CryptoKey> {
+  let deviceKey: Promise<CryptoKey> | null = null
+
+  return () => {
+    deviceKey ??= importDeviceSigningKey(identity)
+
+    return deviceKey
   }
 }
 
@@ -70,6 +103,7 @@ async function ensureOwnMemberEntry(
   doc: Y.Doc,
   persistence: IndexeddbPersistence,
   identity: Identity,
+  deviceKey: () => Promise<CryptoKey>,
 ): Promise<void> {
   await persistence.whenSynced
 
@@ -84,7 +118,7 @@ async function ensureOwnMemberEntry(
     return
   }
 
-  const privateKey = await importDeviceSigningKey(identity)
+  const privateKey = await deviceKey()
   const entry = await createMemberEntry({
     deviceId: identity.deviceId,
     signerPublicKey: identity.signerPublicKey,

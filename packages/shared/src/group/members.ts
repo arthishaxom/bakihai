@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { compareText } from '../compare'
 import { ENTRY_SCHEMA_VERSION, type EntryEnvelope, signEntryEnvelope } from '../entry-envelope'
 import { uuidv7 } from '../uuidv7'
 
@@ -62,14 +63,6 @@ export async function createMemberEntry(input: CreateMemberEntryInput): Promise<
 
 interface FoldedMember extends Member {
   entryId: string
-}
-
-function compareText(left: string, right: string): number {
-  if (left < right) {
-    return -1
-  }
-
-  return left > right ? 1 : 0
 }
 
 function compareEntries(left: FoldedMember, right: FoldedMember): number {
