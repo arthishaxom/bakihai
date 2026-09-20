@@ -3,6 +3,8 @@ import { toBase64Url } from '../src/bytes'
 import {
   exportSigningPublicKey,
   generateSigningKeyPair,
+  generateStorableSigningKeyPair,
+  importSigningPrivateKey,
   importSigningPublicKey,
   signBytes,
   verifyBytes,
@@ -53,5 +55,32 @@ describe('device signing keys', () => {
   it('rejects a malformed public key', async () => {
     await expect(importSigningPublicKey('not+base64url')).rejects.toThrow()
     await expect(importSigningPublicKey(toBase64Url(new Uint8Array(31)))).rejects.toThrow()
+  })
+})
+
+describe('stored device keys', () => {
+  it('restores a stored private key that still signs for the same public key', async () => {
+    const storable = await generateStorableSigningKeyPair()
+    const restored = await importSigningPrivateKey(storable.privateKeyPkcs8)
+    const message = utf8('entry bytes')
+    const signature = await signBytes(restored, message)
+
+    await expect(verifyBytes(storable.publicKey, signature, message)).resolves.toBe(true)
+  })
+
+  it('keeps the working private key non-extractable', async () => {
+    const storable = await generateStorableSigningKeyPair()
+
+    await expect(crypto.subtle.exportKey('pkcs8', storable.privateKey)).rejects.toThrow()
+    await expect(
+      importSigningPrivateKey(storable.privateKeyPkcs8).then((key) =>
+        crypto.subtle.exportKey('pkcs8', key),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('rejects a malformed stored private key', async () => {
+    await expect(importSigningPrivateKey('not+base64url')).rejects.toThrow()
+    await expect(importSigningPrivateKey(toBase64Url(new Uint8Array(8)))).rejects.toThrow()
   })
 })

@@ -7,15 +7,23 @@ export {
   putEntry,
   readEntries,
 } from './book'
-export { type Bytes, fromBase64Url, toBase64Url } from './bytes'
+export {
+  type Bytes,
+  fromBase64Url,
+  isBase64UrlOfByteLength,
+  toBase64Url,
+} from './bytes'
 export { canonicalJson, canonicalJsonBytes } from './canonical-json'
 export { AEAD_IV_BYTES, decryptBytes, encryptBytes } from './crypto/aead'
 export {
   exportSigningPublicKey,
   generateSigningKeyPair,
+  generateStorableSigningKeyPair,
+  importSigningPrivateKey,
   importSigningPublicKey,
   SIGNATURE_BYTES,
   SIGNING_PUBLIC_KEY_BYTES,
+  type StorableSigningKeyPair,
   signBytes,
   verifyBytes,
 } from './crypto/ed25519'
@@ -38,6 +46,26 @@ export {
   unsignedEntryEnvelopeSchema,
   verifyEntryEnvelope,
 } from './entry-envelope'
+export {
+  buildInviteUrl,
+  decodeInvite,
+  encodeInvite,
+  GROUP_NAME_MAX_LENGTH,
+  INVITE_VERSION,
+  type Invite,
+  inviteSchema,
+  readInviteFromHash,
+} from './group/invite'
+export {
+  type CreateMemberEntryInput,
+  createMemberEntry,
+  foldMembers,
+  MEMBER_DISPLAY_NAME_MAX_LENGTH,
+  MEMBER_ENTRY_TYPE,
+  type Member,
+  type MemberEntryPayload,
+  memberEntryPayloadSchema,
+} from './group/members'
 export {
   frameForSealedUpdate,
   MAX_SEALED_UPDATE_CHARS,

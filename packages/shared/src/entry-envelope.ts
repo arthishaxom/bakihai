@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { type Bytes, fromBase64Url, toBase64Url, utf8Decode } from './bytes'
+import {
+  type Bytes,
+  fromBase64Url,
+  isBase64UrlOfByteLength,
+  toBase64Url,
+  utf8Decode,
+} from './bytes'
 import { canonicalJsonBytes } from './canonical-json'
 import { decryptBytes, encryptBytes } from './crypto/aead'
 import {
@@ -17,16 +23,9 @@ export const ENTRY_SCHEMA_VERSION = 1
 export const ENTRY_ENVELOPE_SUBKEY_PURPOSE = 'entry-envelope/v1'
 
 function base64UrlOfByteLength(expectedBytes: number, label: string) {
-  return z.string().refine(
-    (value) => {
-      try {
-        return fromBase64Url(value).length === expectedBytes
-      } catch {
-        return false
-      }
-    },
-    { message: `${label} must be ${expectedBytes} bytes encoded as unpadded base64url` },
-  )
+  return z.string().refine((value) => isBase64UrlOfByteLength(value, expectedBytes), {
+    message: `${label} must be ${expectedBytes} bytes encoded as unpadded base64url`,
+  })
 }
 
 /**

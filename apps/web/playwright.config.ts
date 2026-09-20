@@ -24,7 +24,10 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: 'VITE_E2E=1 pnpm build && pnpm preview --strictPort',
+      // The e2e build bakes in the locally running relay; a deploy uses the
+      // production relay URL from the build environment instead.
+      command:
+        'VITE_E2E=1 VITE_RELAY_URL=http://localhost:8787 pnpm build && pnpm preview --strictPort',
       url: 'http://localhost:4173',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

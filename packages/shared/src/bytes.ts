@@ -69,6 +69,19 @@ export function fromBase64Url(text: string): Bytes {
   return bytes
 }
 
+/** True when a value is unpadded base64url for exactly `expectedBytes` bytes. */
+export function isBase64UrlOfByteLength(value: unknown, expectedBytes: number): value is string {
+  if (typeof value !== 'string') {
+    return false
+  }
+
+  try {
+    return fromBase64Url(value).length === expectedBytes
+  } catch {
+    return false
+  }
+}
+
 /** Encodes a string as UTF-8 bytes. */
 export function utf8Encode(value: string): Bytes {
   return textEncoder.encode(value) as Bytes
