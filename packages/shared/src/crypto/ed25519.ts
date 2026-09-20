@@ -32,7 +32,9 @@ export function verifyBytes(
 
 /** Exports a public key as 32 bytes of unpadded base64url. */
 export async function exportSigningPublicKey(publicKey: CryptoKey): Promise<string> {
-  return toBase64Url(new Uint8Array(await crypto.subtle.exportKey('raw', publicKey)))
+  const exported = await crypto.subtle.exportKey('raw', publicKey)
+
+  return toBase64Url(new Uint8Array(exported as ArrayBuffer))
 }
 
 /** Imports a base64url raw Ed25519 public key for verification. */

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BakiHai sync harness</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 1rem;
+      }
+
+      #status {
+        font-weight: 600;
+      }
+
+      #errors {
+        color: #b00020;
+      }
+
+      li {
+        margin: 0.25rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>BakiHai sync harness</h1>
+    <p>Test-only page that drives the book sync provider in a real browser.</p>
+    <p>
+      Status:
+      <span id="status" data-testid="sync-status" data-status="disconnected">disconnected</span>
+    </p>
+    <p>Errors: <span id="errors" data-testid="sync-errors">0</span></p>
+    <ul id="entries" data-testid="entries"></ul>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

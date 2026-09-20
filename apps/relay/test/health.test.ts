@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import worker, { type Env } from '../src/index'
 
-const env: Env = {}
+const env = {} as Env
 const ctx = {} as ExecutionContext
 
 describe('relay worker', () => {

@@ -71,7 +71,7 @@ export function fromBase64Url(text: string): Bytes {
 
 /** Encodes a string as UTF-8 bytes. */
 export function utf8Encode(value: string): Bytes {
-  return textEncoder.encode(value)
+  return textEncoder.encode(value) as Bytes
 }
 
 /** Decodes UTF-8 bytes. */

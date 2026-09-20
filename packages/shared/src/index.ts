@@ -1,4 +1,12 @@
 // Entry envelopes, envelope crypto, and Balance computation live here (ADR-0001, ADR-0002, ADR-0004).
+
+export {
+  BOOK_ENTRIES_MAP,
+  createBookDoc,
+  entriesMap,
+  putEntry,
+  readEntries,
+} from './book'
 export { type Bytes, fromBase64Url, toBase64Url } from './bytes'
 export { canonicalJson, canonicalJsonBytes } from './canonical-json'
 export { AEAD_IV_BYTES, decryptBytes, encryptBytes } from './crypto/aead'
@@ -30,4 +38,26 @@ export {
   unsignedEntryEnvelopeSchema,
   verifyEntryEnvelope,
 } from './entry-envelope'
+export {
+  frameForSealedUpdate,
+  MAX_SEALED_UPDATE_CHARS,
+  parseSealedUpdateFrame,
+  type SealedUpdateFrame,
+  sealedUpdateFrameSchema,
+} from './sync/frames'
+export {
+  BOOK_ROOM_PARTY,
+  BookSyncProvider,
+  type BookSyncProviderOptions,
+  relaySocketUrl,
+  type SyncSocket,
+  type SyncSocketFactory,
+  type SyncStatus,
+} from './sync/provider'
+export {
+  BOOK_UPDATE_SUBKEY_PURPOSE,
+  deriveBookUpdateKey,
+  openBookUpdate,
+  sealBookUpdate,
+} from './sync/update-crypto'
 export { uuidv7 } from './uuidv7'
