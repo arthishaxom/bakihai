@@ -1,4 +1,4 @@
-import { parseSealedUpdateFrame, type SealedUpdateFrame } from '@bakihai/shared'
+import { parseRelayFrame, type SealedUpdateFrame } from '@bakihai/shared'
 import { type Connection, Server, type WSMessage } from 'partyserver'
 
 interface SealedUpdateRow extends Record<string, SqlStorageValue> {
@@ -13,7 +13,8 @@ interface SealedUpdateRow extends Record<string, SqlStorageValue> {
  * arrives, appends every valid frame it receives, and fans those frames out to
  * the other connections. It never holds a Group key, so it cannot read an
  * Entry, an amount, or a name: an invalid or hostile frame is simply dropped
- * (ADR-0002).
+ * (ADR-0002). Heartbeats are the exception to the log: the room echoes them
+ * straight back to their sender and stores nothing (ADR-0011).
  *
  * Hibernation is on, so the room costs nothing while nobody is connected.
  */
@@ -40,9 +41,16 @@ export class BookRoom extends Server {
       return
     }
 
-    const frame = parseSealedUpdateFrame(message)
+    const frame = parseRelayFrame(message)
 
     if (!frame) {
+      return
+    }
+
+    // A heartbeat proves the link is alive. It is echoed to its sender and
+    // never stored or fanned out, because it carries no book data (ADR-0011).
+    if (frame.t === 'heartbeat') {
+      connection.send(JSON.stringify(frame))
       return
     }
 

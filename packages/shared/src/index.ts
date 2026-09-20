@@ -79,8 +79,14 @@ export {
 export { formatPaiseAsRupees, parseRupeesToPaise } from './money'
 export {
   frameForSealedUpdate,
+  HEARTBEAT_FRAME,
+  type HeartbeatFrame,
+  heartbeatFrameSchema,
   MAX_SEALED_UPDATE_CHARS,
+  parseRelayFrame,
   parseSealedUpdateFrame,
+  type RelayFrame,
+  relayFrameSchema,
   type SealedUpdateFrame,
   sealedUpdateFrameSchema,
 } from './sync/frames'
@@ -88,6 +94,7 @@ export {
   BOOK_ROOM_PARTY,
   BookSyncProvider,
   type BookSyncProviderOptions,
+  type PresenceSignals,
   relaySocketUrl,
   type SyncSocket,
   type SyncSocketFactory,

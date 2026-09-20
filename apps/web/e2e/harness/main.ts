@@ -25,6 +25,8 @@ interface HarnessApi {
   entries(): HarnessEntry[]
   errors(): string[]
   status(): string
+  /** Every status the provider has reported, in order; the sync chip's history. */
+  statusLog(): string[]
   connect(): void
   disconnect(): void
   reconnect(): void
@@ -48,10 +50,28 @@ function required(name: string): string {
   return value
 }
 
+function optionalNumber(name: string): number | undefined {
+  const value = params.get(name)
+
+  if (value === null) {
+    return undefined
+  }
+
+  const parsed = Number(value)
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Harness URL has an invalid ?${name}`)
+  }
+
+  return parsed
+}
+
 const room = required('room')
 const groupKey = fromBase64Url(required('key'))
 const relayUrl = params.get('relay') ?? 'http://localhost:8790'
 const autoconnect = params.get('autoconnect') !== '0'
+const heartbeatIntervalMs = optionalNumber('heartbeatInterval')
+const heartbeatTimeoutMs = optionalNumber('heartbeatTimeout')
 
 const doc = createBookDoc()
 const persistence = persistBook(doc, room)
@@ -67,6 +87,9 @@ const provider = new BookSyncProvider({
   room,
   relayUrl,
   connect: autoconnect,
+  // Tests compress the cadence to fit many idle windows into a CI-sized wait.
+  ...(heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs }),
+  ...(heartbeatTimeoutMs === undefined ? {} : { heartbeatTimeoutMs }),
 })
 
 function requireElement(selector: string): HTMLElement {
@@ -84,6 +107,7 @@ const errorsElement = requireElement('#errors')
 const entriesElement = requireElement('#entries')
 
 const errors: string[] = []
+const statusLog: string[] = []
 
 function entries(): HarnessEntry[] {
   return readEntries(doc).map((entry) => {
@@ -114,7 +138,10 @@ function render(): void {
   )
 }
 
-provider.on('status', render)
+provider.on('status', (status) => {
+  statusLog.push(status)
+  render()
+})
 provider.on('error', (error) => {
   errors.push(error instanceof Error ? error.message : String(error))
   render()
@@ -147,6 +174,7 @@ window.harness = {
   entries,
   errors: () => [...errors],
   status: () => provider.status,
+  statusLog: () => [...statusLog],
   connect: () => provider.connect(),
   disconnect: () => provider.disconnect(),
   reconnect: () => {

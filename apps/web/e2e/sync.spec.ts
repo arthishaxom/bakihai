@@ -13,6 +13,7 @@ const HARNESS_PATH = '/e2e/harness/harness.html'
 const HKDF_SALT = new TextEncoder().encode('bakihai/v1/group-key')
 const HKDF_INFO = new TextEncoder().encode('book-update/v1')
 const IV_BYTES = 12
+const HEARTBEAT_TEXT = '{"t":"heartbeat"}'
 
 function newGroup(): Group {
   return {
@@ -21,11 +22,25 @@ function newGroup(): Group {
   }
 }
 
-function harnessUrl(group: Group, options: { autoconnect?: boolean } = {}): string {
+interface HarnessOptions {
+  autoconnect?: boolean
+  heartbeatIntervalMs?: number
+  heartbeatTimeoutMs?: number
+}
+
+function harnessUrl(group: Group, options: HarnessOptions = {}): string {
   const query = new URLSearchParams({ room: group.room, key: group.key, relay: RELAY_URL })
 
   if (options.autoconnect === false) {
     query.set('autoconnect', '0')
+  }
+
+  if (options.heartbeatIntervalMs !== undefined) {
+    query.set('heartbeatInterval', String(options.heartbeatIntervalMs))
+  }
+
+  if (options.heartbeatTimeoutMs !== undefined) {
+    query.set('heartbeatTimeout', String(options.heartbeatTimeoutMs))
   }
 
   return `${HARNESS_PATH}?${query.toString()}`
@@ -34,7 +49,7 @@ function harnessUrl(group: Group, options: { autoconnect?: boolean } = {}): stri
 async function openHarness(
   context: BrowserContext,
   group: Group,
-  options: { autoconnect?: boolean } = {},
+  options: HarnessOptions = {},
 ): Promise<Page> {
   const page = await context.newPage()
 
@@ -50,6 +65,10 @@ function entryLocator(page: Page, id: string) {
 
 function statusLocator(page: Page) {
   return page.getByTestId('sync-status')
+}
+
+function frameText(payload: string | Buffer): string {
+  return Buffer.isBuffer(payload) ? payload.toString('utf8') : payload
 }
 
 async function deriveSyncKey(groupKey: string): Promise<webcrypto.CryptoKey> {
@@ -163,17 +182,19 @@ test('a fresh device rebuilds the book from the relay', async ({ browser }) => {
   await contextC.close()
 })
 
-test('the relay only ever carries sealed updates', async ({ browser }) => {
+test('the relay only carries sealed updates and empty heartbeats', async ({ browser }) => {
   const group = newGroup()
   const context = await browser.newContext()
   const page = await context.newPage()
-  const frames: Buffer[] = []
+  const sent: string[] = []
+  const received: string[] = []
 
   page.on('websocket', (socket) => {
     socket.on('framesent', (event) => {
-      frames.push(
-        Buffer.isBuffer(event.payload) ? event.payload : Buffer.from(event.payload, 'utf8'),
-      )
+      sent.push(frameText(event.payload))
+    })
+    socket.on('framereceived', (event) => {
+      received.push(frameText(event.payload))
     })
   })
 
@@ -188,24 +209,32 @@ test('the relay only ever carries sealed updates', async ({ browser }) => {
   )
   await expect(entryLocator(page, id)).toBeVisible()
 
-  // One frame publishes the book on connect, the next carries the live Entry.
-  await expect.poll(() => frames.length).toBeGreaterThanOrEqual(2)
+  // The book publishes on connect and frames keep flowing.
+  await expect.poll(() => sent.length).toBeGreaterThanOrEqual(2)
+
+  // Heartbeats travel both ways: the device sends one, the relay echoes it.
+  await expect.poll(() => sent.includes(HEARTBEAT_TEXT), { timeout: 10_000 }).toBe(true)
+  await expect.poll(() => received.includes(HEARTBEAT_TEXT), { timeout: 10_000 }).toBe(true)
 
   const groupKey = await deriveSyncKey(group.key)
   const strangerKey = await deriveSyncKey(Buffer.from(randomBytes(32)).toString('base64url'))
 
-  for (const frame of frames) {
-    const text = frame.toString('utf8')
-
+  for (const text of sent) {
     expect(text).not.toContain(note)
     expect(text).not.toContain('90000')
 
-    const parsed = JSON.parse(text) as { t: string; d: string }
+    const parsed = JSON.parse(text) as { t: string; d?: string }
+
+    if (parsed.t === 'heartbeat') {
+      // A heartbeat is exactly its type: no book data, no payload.
+      expect(text).toBe(HEARTBEAT_TEXT)
+      continue
+    }
 
     expect(parsed.t).toBe('update')
     expect(parsed.d).toMatch(/^[A-Za-z0-9_-]+$/)
 
-    const sealed = Buffer.from(parsed.d, 'base64url')
+    const sealed = Buffer.from(parsed.d as string, 'base64url')
 
     expect(sealed.toString('utf8')).not.toContain(note)
 
@@ -214,6 +243,124 @@ test('the relay only ever carries sealed updates', async ({ browser }) => {
     await expect(decryptSealed(sealed, strangerKey)).rejects.toThrow()
   }
 
+  expect(await page.getByTestId('sync-errors').textContent()).toBe('0')
+
+  await context.close()
+})
+
+test('a frame lost to a silently dead link heals without a reload', async ({ browser }) => {
+  const group = newGroup()
+  const contextA = await browser.newContext()
+  const contextB = await browser.newContext()
+  const pageA = await contextA.newPage()
+  let socketsA = 0
+
+  pageA.on('websocket', () => {
+    socketsA += 1
+  })
+
+  // The dropped-frame seam: the page's socket stays open while every frame on
+  // it is swallowed, so the relay never sees A's Entry or its heartbeat.
+  // setOffline cannot reproduce this — Chromium buffers and flushes frames.
+  let cut = false
+  await pageA.routeWebSocket(/\/parties\/book-room\//, (ws) => {
+    const server = ws.connectToServer()
+
+    ws.onMessage((message) => {
+      if (cut) {
+        return
+      }
+
+      server.send(message)
+    })
+  })
+
+  await pageA.goto(harnessUrl(group))
+  await pageA.waitForFunction(() => document.documentElement.dataset.ready === 'true')
+  const pageB = await openHarness(contextB, group)
+  await pageA.bringToFront()
+
+  await expect(statusLocator(pageA)).toHaveAttribute('data-status', 'connected')
+  await expect(statusLocator(pageB)).toHaveAttribute('data-status', 'connected')
+  await expect.poll(() => socketsA).toBe(1)
+
+  cut = true
+
+  const lostId = await pageA.evaluate(() =>
+    window.harness.addEntry({ note: 'lost dinner', amountPaise: 42_000 }),
+  )
+  // The causal wedge: the next Entry rides the same silent link.
+  const wedgedId = await pageA.evaluate(() =>
+    window.harness.addEntry({ note: 'after the loss', amountPaise: 7_000 }),
+  )
+
+  // A still calls itself Online at first: the socket looks open. But it shows
+  // only its own Entries; B sees nothing, and only the watchdog can notice.
+  expect(await pageA.evaluate(() => window.harness.status())).toBe('connected')
+  await expect(entryLocator(pageB, lostId)).toHaveCount(0)
+
+  // The chip stops saying Online within the watchdog window: an open socket
+  // is not enough to be "connected", only a heartbeat that came back.
+  await expect(statusLocator(pageA)).not.toHaveAttribute('data-status', 'connected', {
+    timeout: 10_000,
+  })
+
+  // Frames flow again; a fresh connection publishes the whole book, so both
+  // the lost Entry and the one written after it reach B.
+  cut = false
+
+  await expect(entryLocator(pageB, lostId)).toBeVisible({ timeout: 10_000 })
+  await expect(entryLocator(pageB, wedgedId)).toBeVisible()
+
+  // Live updates flow again without a reload or a manual reconnect.
+  const liveId = await pageA.evaluate(() =>
+    window.harness.addEntry({ note: 'live chai', amountPaise: 3_000 }),
+  )
+  await expect(entryLocator(pageB, liveId)).toBeVisible()
+  await expect(statusLocator(pageA)).toHaveAttribute('data-status', 'connected')
+
+  // Recovery came from a fresh connection the provider opened itself.
+  expect(socketsA).toBeGreaterThanOrEqual(2)
+
+  await contextA.close()
+  await contextB.close()
+})
+
+test('an idle room keeps one socket and publishes once', async ({ browser }) => {
+  const group = newGroup()
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  const sentBySocket: string[][] = []
+
+  page.on('websocket', (socket) => {
+    const sent: string[] = []
+
+    sentBySocket.push(sent)
+    socket.on('framesent', (event) => {
+      sent.push(frameText(event.payload))
+    })
+  })
+
+  // Compress the heartbeat cadence so 15 s holds ~10 watchdog windows and
+  // ~30 heartbeats: the same rehearsal several idle minutes would give.
+  await page.goto(harnessUrl(group, { heartbeatIntervalMs: 500, heartbeatTimeoutMs: 1_000 }))
+  await page.waitForFunction(() => document.documentElement.dataset.ready === 'true')
+  await page.bringToFront()
+  await expect(statusLocator(page)).toHaveAttribute('data-status', 'connected')
+
+  await page.waitForTimeout(15_000)
+
+  expect(sentBySocket).toHaveLength(1)
+
+  const sent = sentBySocket[0] ?? []
+  const heartbeats = sent.filter((frame) => frame === HEARTBEAT_TEXT)
+  const updates = sent.filter((frame) => frame !== HEARTBEAT_TEXT)
+
+  // One publish on connect, no republishes, and heartbeats are flowing. The
+  // status log holds no reconnect, only the connection the page opened itself.
+  expect(updates).toHaveLength(1)
+  expect(heartbeats.length).toBeGreaterThanOrEqual(15)
+  expect(await page.evaluate(() => window.harness.statusLog())).toEqual(['connected'])
   expect(await page.getByTestId('sync-errors').textContent()).toBe('0')
 
   await context.close()

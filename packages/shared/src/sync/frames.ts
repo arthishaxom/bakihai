@@ -10,9 +10,9 @@ export const MAX_SEALED_UPDATE_CHARS = 8 * 1024 * 1024
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/
 
 /**
- * The wire frame between a device and the relay. It carries an opaque sealed
- * update and nothing else: no room, no type, no Entry fields. The relay can
- * route and store it without ever learning what is inside (ADR-0002).
+ * A wire frame carrying an opaque sealed update. It holds the sealed bytes and
+ * nothing else: no room, no type, no Entry fields. The relay can route and
+ * store it without ever learning what is inside (ADR-0002).
  */
 export const sealedUpdateFrameSchema = z.strictObject({
   t: z.literal('update'),
@@ -25,6 +25,28 @@ export const sealedUpdateFrameSchema = z.strictObject({
 
 export type SealedUpdateFrame = z.infer<typeof sealedUpdateFrameSchema>
 
+/**
+ * A liveness heartbeat. It carries no book data: the relay stores nothing and
+ * echoes it to its sender, which is how a device tells a quiet link from a
+ * dead one without acknowledging every update (ADR-0011).
+ */
+export const heartbeatFrameSchema = z.strictObject({
+  t: z.literal('heartbeat'),
+})
+
+export type HeartbeatFrame = z.infer<typeof heartbeatFrameSchema>
+
+/** The one heartbeat frame; devices send it and the relay echoes it back. */
+export const HEARTBEAT_FRAME: HeartbeatFrame = { t: 'heartbeat' }
+
+/** Any frame that travels between a device and the relay. */
+export const relayFrameSchema = z.discriminatedUnion('t', [
+  sealedUpdateFrameSchema,
+  heartbeatFrameSchema,
+])
+
+export type RelayFrame = z.infer<typeof relayFrameSchema>
+
 /** Wraps sealed update bytes as the frame sent over the wire. */
 export function frameForSealedUpdate(sealed: Bytes): SealedUpdateFrame {
   return { t: 'update', d: toBase64Url(sealed) }
@@ -32,10 +54,10 @@ export function frameForSealedUpdate(sealed: Bytes): SealedUpdateFrame {
 
 /**
  * Parses an untrusted wire frame, returning null for anything that is not a
- * well-formed sealed update, so a hostile or broken client cannot crash the
- * relay or poison its log.
+ * well-formed update or heartbeat, so a hostile or broken client cannot crash
+ * the relay or poison its log.
  */
-export function parseSealedUpdateFrame(raw: string): SealedUpdateFrame | null {
+export function parseRelayFrame(raw: string): RelayFrame | null {
   let parsed: unknown
 
   try {
@@ -44,7 +66,14 @@ export function parseSealedUpdateFrame(raw: string): SealedUpdateFrame | null {
     return null
   }
 
-  const result = sealedUpdateFrameSchema.safeParse(parsed)
+  const result = relayFrameSchema.safeParse(parsed)
 
   return result.success ? result.data : null
+}
+
+/** Parses a frame that must be a sealed update, returning null for anything else. */
+export function parseSealedUpdateFrame(raw: string): SealedUpdateFrame | null {
+  const frame = parseRelayFrame(raw)
+
+  return frame?.t === 'update' ? frame : null
 }

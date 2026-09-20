@@ -88,6 +88,19 @@ describe('BookRoom', () => {
     expect(send.mock.calls.map(([frame]) => frame)).toEqual([frameFor('A'), frameFor('B')])
   })
 
+  it('echoes a heartbeat to its sender without storing or broadcasting it', async () => {
+    const { room, sql, broadcast } = createRoom()
+    await room.onStart()
+    const { connection, send } = createConnection('connection-a')
+    const heartbeat = JSON.stringify({ t: 'heartbeat' })
+
+    room.onMessage(connection, heartbeat)
+
+    expect(send.mock.calls.map(([frame]) => frame)).toEqual([heartbeat])
+    expect(sql.rows).toEqual([])
+    expect(broadcast).not.toHaveBeenCalled()
+  })
+
   it('drops malformed, binary, and hostile frames without storing them', async () => {
     const { room, sql, broadcast } = createRoom()
     await room.onStart()
@@ -101,6 +114,8 @@ describe('BookRoom', () => {
       JSON.stringify({ t: 'update', d: 'A'.repeat(16), entry: 'dinner' }),
       JSON.stringify({ t: 'update', d: 'not base64url!' }),
       JSON.stringify({ t: 'update', d: '' }),
+      JSON.stringify({ t: 'heartbeat', d: 'A'.repeat(16) }),
+      JSON.stringify({ t: 'heartbeat', entry: 'dinner' }),
       binary,
     ]
 
