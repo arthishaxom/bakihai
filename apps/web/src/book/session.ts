@@ -7,6 +7,7 @@ import {
   MEMBER_ENTRY_TYPE,
   putEntry,
   readEntries,
+  verifyEntryEnvelope,
 } from '@bakihai/shared'
 import type { IndexeddbPersistence } from 'y-indexeddb'
 import type * as Y from 'yjs'
@@ -107,14 +108,7 @@ async function ensureOwnMemberEntry(
 ): Promise<void> {
   await persistence.whenSynced
 
-  const alreadyJoined = readEntries(doc).some(
-    (entry) =>
-      entry.type === MEMBER_ENTRY_TYPE &&
-      entry.authorDeviceId === identity.deviceId &&
-      entry.signerPublicKey === identity.signerPublicKey,
-  )
-
-  if (alreadyJoined) {
+  if (await hasOwnMemberEntry(doc, identity)) {
     return
   }
 
@@ -127,4 +121,31 @@ async function ensureOwnMemberEntry(
   })
 
   putEntry(doc, entry)
+}
+
+/**
+ * Whether this device's own Member Entry is in the book. A well-formed claim
+ * on our device id only counts when it carries a signature by our key: a
+ * forged Entry must not stop the real device from announcing itself (#8).
+ */
+async function hasOwnMemberEntry(doc: Y.Doc, identity: Identity): Promise<boolean> {
+  for (const entry of readEntries(doc)) {
+    if (
+      entry.type !== MEMBER_ENTRY_TYPE ||
+      entry.authorDeviceId !== identity.deviceId ||
+      entry.signerPublicKey !== identity.signerPublicKey
+    ) {
+      continue
+    }
+
+    try {
+      await verifyEntryEnvelope(entry)
+
+      return true
+    } catch {
+      // Not signed by this device; keep looking.
+    }
+  }
+
+  return false
 }

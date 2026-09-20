@@ -1,48 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { exportSigningPublicKey, generateSigningKeyPair } from '../src/crypto/ed25519'
 import { type EntryEnvelope, verifyEntryEnvelope } from '../src/entry-envelope'
 import {
   createMemberEntry,
+  foldMemberKeys,
   foldMembers,
   MEMBER_DISPLAY_NAME_MAX_LENGTH,
   MEMBER_ENTRY_TYPE,
   type Member,
 } from '../src/group/members'
-import { uuidv7 } from '../src/uuidv7'
-import { makeEntry } from './helpers/entries'
+import { makeDevice, makeEntry, makeMemberEntry, type TestDevice } from './helpers/entries'
 
 const JOINED_AT = '2026-09-20T10:00:00.000Z'
 const LATER = '2026-09-21T10:00:00.000Z'
-
-interface TestDevice {
-  deviceId: string
-  signerPublicKey: string
-  pair: CryptoKeyPair
-}
-
-async function makeDevice(): Promise<TestDevice> {
-  const pair = await generateSigningKeyPair()
-
-  return {
-    pair,
-    deviceId: uuidv7(),
-    signerPublicKey: await exportSigningPublicKey(pair.publicKey),
-  }
-}
-
-function memberEntry(
-  device: TestDevice,
-  displayName: string,
-  occurredAt = JOINED_AT,
-): Promise<EntryEnvelope> {
-  return createMemberEntry({
-    deviceId: device.deviceId,
-    signerPublicKey: device.signerPublicKey,
-    privateKey: device.pair.privateKey,
-    displayName,
-    occurredAt,
-  })
-}
 
 function memberOf(device: TestDevice, displayName: string, joinedAt = JOINED_AT): Member {
   return {
@@ -56,7 +25,13 @@ function memberOf(device: TestDevice, displayName: string, joinedAt = JOINED_AT)
 describe('Member Entries', () => {
   it('creates a signed Member Entry that verifies', async () => {
     const device = await makeDevice()
-    const entry = await memberEntry(device, '  Rohan  ')
+    const entry = await createMemberEntry({
+      deviceId: device.deviceId,
+      signerPublicKey: device.signerPublicKey,
+      privateKey: device.keyPair.privateKey,
+      displayName: '  Rohan  ',
+      occurredAt: JOINED_AT,
+    })
 
     expect(entry.type).toBe(MEMBER_ENTRY_TYPE)
     expect(entry.authorDeviceId).toBe(device.deviceId)
@@ -68,11 +43,16 @@ describe('Member Entries', () => {
 
   it('refuses an empty or oversized display name', async () => {
     const device = await makeDevice()
+    const draft = (displayName: string) =>
+      createMemberEntry({
+        deviceId: device.deviceId,
+        signerPublicKey: device.signerPublicKey,
+        privateKey: device.keyPair.privateKey,
+        displayName,
+      })
 
-    await expect(memberEntry(device, '   ')).rejects.toThrow()
-    await expect(
-      memberEntry(device, 'x'.repeat(MEMBER_DISPLAY_NAME_MAX_LENGTH + 1)),
-    ).rejects.toThrow()
+    await expect(draft('   ')).rejects.toThrow()
+    await expect(draft('x'.repeat(MEMBER_DISPLAY_NAME_MAX_LENGTH + 1))).rejects.toThrow()
   })
 })
 
@@ -81,8 +61,8 @@ describe('foldMembers', () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
     const entries = [
-      await memberEntry(mira, 'Mira', LATER),
-      await memberEntry(rohan, 'Rohan', JOINED_AT),
+      await makeMemberEntry(mira, 'Mira', LATER),
+      await makeMemberEntry(rohan, 'Rohan', JOINED_AT),
     ]
 
     expect(foldMembers(entries)).toEqual([
@@ -94,9 +74,9 @@ describe('foldMembers', () => {
   it('yields the same roster whatever order the Entries arrive in', async () => {
     const devices = await Promise.all([makeDevice(), makeDevice(), makeDevice()])
     const entries = await Promise.all([
-      memberEntry(devices[0] as TestDevice, 'Rohan', JOINED_AT),
-      memberEntry(devices[1] as TestDevice, 'Mira', LATER),
-      memberEntry(devices[2] as TestDevice, 'Dev', '2026-09-22T10:00:00.000Z'),
+      makeMemberEntry(devices[0] as TestDevice, 'Rohan', JOINED_AT),
+      makeMemberEntry(devices[1] as TestDevice, 'Mira', LATER),
+      makeMemberEntry(devices[2] as TestDevice, 'Dev', '2026-09-22T10:00:00.000Z'),
     ])
     const expected = foldMembers(entries)
 
@@ -119,7 +99,7 @@ describe('foldMembers', () => {
         type: MEMBER_ENTRY_TYPE,
         payload: { displayName: 'Rohan', extra: true },
       }),
-      await memberEntry(device, 'Mira'),
+      await makeMemberEntry(device, 'Mira'),
     ]
 
     expect(foldMembers(entries)).toEqual([memberOf(device, 'Mira')])
@@ -130,10 +110,45 @@ describe('foldMembers', () => {
 
     expect(
       foldMembers([
-        await memberEntry(device, 'Old', JOINED_AT),
-        await memberEntry(device, 'New', LATER),
+        await makeMemberEntry(device, 'Old', JOINED_AT),
+        await makeMemberEntry(device, 'New', LATER),
       ]),
     ).toEqual([memberOf(device, 'New', LATER)])
+  })
+
+  it('ignores a later claim on a bound device id under another key', async () => {
+    const rohan = await makeDevice()
+    const mallory = await makeDevice()
+    const joined = await makeMemberEntry(rohan, 'Rohan')
+    const claim = await makeMemberEntry(
+      { ...mallory, deviceId: rohan.deviceId },
+      'Not Rohan',
+      LATER,
+    )
+
+    expect(foldMembers([joined, claim])).toEqual([memberOf(rohan, 'Rohan')])
+    expect(foldMembers([claim, joined])).toEqual([memberOf(rohan, 'Rohan')])
+    expect(foldMemberKeys([joined, claim])).toEqual(
+      new Map([[rohan.deviceId, rohan.signerPublicKey]]),
+    )
+  })
+
+  it('ignores a backdated claim on a bound device id', async () => {
+    const mira = await makeDevice()
+    const mallory = await makeDevice()
+    const joined = await makeMemberEntry(mira, 'Mira')
+    // The claim is minted after Mira's Entry but claims to predate it, so only
+    // a fold that trusts the device clock would let it win.
+    const backdated = await makeMemberEntry(
+      { ...mallory, deviceId: mira.deviceId },
+      'Not Mira',
+      '1970-01-01T00:00:00.000Z',
+    )
+
+    expect(foldMembers([backdated, joined])).toEqual([memberOf(mira, 'Mira')])
+    expect(foldMemberKeys([backdated, joined])).toEqual(
+      new Map([[mira.deviceId, mira.signerPublicKey]]),
+    )
   })
 
   it('is empty for a book with no Member Entries', async () => {

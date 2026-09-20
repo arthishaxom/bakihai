@@ -95,6 +95,29 @@ describe('foldBalances', () => {
     expect(foldBalances([entries[2], entries[0], entries[1]] as typeof entries)).toEqual(expected)
   })
 
+  it('folds the same Balances no matter what the Entries claim about the clock', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const entries = [
+      await makeExpenseEntry(rohan, {
+        amountPaise: 90_000,
+        participantDeviceIds: [rohan.deviceId, mira.deviceId],
+        occurredAt: '1970-01-01T00:00:00.000Z',
+      }),
+      await makeExpenseEntry(mira, {
+        amountPaise: 4000,
+        participantDeviceIds: [rohan.deviceId, mira.deviceId],
+        occurredAt: '2999-12-31T23:59:59.999Z',
+      }),
+    ]
+
+    // Time orders the ledger for reading; it never moves a paise.
+    expect(foldBalances(entries)).toEqual([
+      { debtorDeviceId: mira.deviceId, creditorDeviceId: rohan.deviceId, amountPaise: 43_000 },
+    ])
+    expect(foldBalances([...entries].reverse())).toEqual(foldBalances(entries))
+  })
+
   it('creates no balance for an Expense only its payer shares', async () => {
     const rohan = await makeDevice()
 

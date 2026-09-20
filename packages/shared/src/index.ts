@@ -46,6 +46,7 @@ export {
   unsignedEntryEnvelopeSchema,
   verifyEntryEnvelope,
 } from './entry-envelope'
+export { admitEntries } from './group/admission'
 export { type Balance, foldBalances } from './group/balances'
 export {
   type CreateExpenseEntryInput,
@@ -69,6 +70,7 @@ export {
 export {
   type CreateMemberEntryInput,
   createMemberEntry,
+  foldMemberKeys,
   foldMembers,
   MEMBER_DISPLAY_NAME_MAX_LENGTH,
   MEMBER_ENTRY_TYPE,

@@ -65,19 +65,16 @@ interface FoldedMember extends Member {
   entryId: string
 }
 
-function compareEntries(left: FoldedMember, right: FoldedMember): number {
-  return compareText(left.joinedAt, right.joinedAt) || compareText(left.entryId, right.entryId)
-}
-
 /**
- * Folds the book's Member Entries into the Group roster, one entry per device:
- * the roster is a pure function of the Entries, so every device that holds the
- * same book shows the same Members (ADR-0001). A device that wrote more than
- * once (a rejoin) counts by its latest Entry, and Entries whose payload this
- * app version cannot read are ignored rather than misread.
+ * One claim per readable Member Entry, in the order bindings settle: Entry id
+ * ascending. Entry ids carry their minting device's clock, so a determined
+ * author can backdate a claim to race a device id they have already seen; that
+ * race is ADR-0012's, left to social trust. What the id order does give is a
+ * stable rank for every Entry already in the book, where the free-form
+ * `occurredAt` moves display order only (#8).
  */
-export function foldMembers(entries: EntryEnvelope[]): Member[] {
-  const latestByDevice = new Map<string, FoldedMember>()
+function memberClaims(entries: EntryEnvelope[]): FoldedMember[] {
+  const claims: FoldedMember[] = []
 
   for (const entry of entries) {
     if (entry.type !== MEMBER_ENTRY_TYPE) {
@@ -90,21 +87,57 @@ export function foldMembers(entries: EntryEnvelope[]): Member[] {
       continue
     }
 
-    const candidate: FoldedMember = {
+    claims.push({
       deviceId: entry.authorDeviceId,
       displayName: payload.data.displayName,
       signerPublicKey: entry.signerPublicKey,
       joinedAt: entry.occurredAt,
       entryId: entry.id,
-    }
-    const existing = latestByDevice.get(entry.authorDeviceId)
+    })
+  }
 
-    if (!existing || compareEntries(existing, candidate) < 0) {
-      latestByDevice.set(entry.authorDeviceId, candidate)
+  return claims.sort((left, right) => compareText(left.entryId, right.entryId))
+}
+
+/**
+ * The signing key each device is bound to, folded from Member Entries: the
+ * first claim for a device id fixes it to that key, and no later Entry can
+ * rebind it (ADR-0007, #8). Entries from devices with no readable Member
+ * Entry have no binding.
+ */
+export function foldMemberKeys(entries: EntryEnvelope[]): Map<string, string> {
+  const keys = new Map<string, string>()
+
+  for (const claim of memberClaims(entries)) {
+    if (!keys.has(claim.deviceId)) {
+      keys.set(claim.deviceId, claim.signerPublicKey)
     }
   }
 
-  return [...latestByDevice.values()]
+  return keys
+}
+
+/**
+ * Folds the book's Member Entries into the Group roster, one entry per device:
+ * the roster is a pure function of the Entries, so every device that holds the
+ * same book shows the same Members (ADR-0001). A device's first Member Entry
+ * binds its id to its signing key, and only Entries that still use that key
+ * can rename it — a claim on someone else's device id is ignored rather than
+ * believed, so an Entry cannot be written as another Member (#8). Entries
+ * whose payload this app version cannot read are ignored rather than misread.
+ */
+export function foldMembers(entries: EntryEnvelope[]): Member[] {
+  const roster = new Map<string, FoldedMember>()
+
+  for (const claim of memberClaims(entries)) {
+    const bound = roster.get(claim.deviceId)
+
+    if (!bound || bound.signerPublicKey === claim.signerPublicKey) {
+      roster.set(claim.deviceId, claim)
+    }
+  }
+
+  return [...roster.values()]
     .sort(
       (left, right) =>
         compareText(left.joinedAt, right.joinedAt) || compareText(left.deviceId, right.deviceId),

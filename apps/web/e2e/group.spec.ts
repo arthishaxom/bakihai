@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createGroup, joinGroup, memberNames } from './helpers'
+import { createGroup, invitePayload, joinGroup, memberNames } from './helpers'
 
 const HARNESS_PATH = '/e2e/harness/harness.html'
 
@@ -44,18 +44,20 @@ test('a joiner rebuilds Entries made before it joined', async ({ browser }) => {
 
   // The creator's phone writes an Entry through the sync harness before the
   // second device has ever opened the link.
-  const invitePayload = JSON.parse(
-    Buffer.from(new URL(invite).hash.replace('#invite=', ''), 'base64url').toString('utf8'),
-  ) as { room: string; key: string; relay: string }
+  const inviteGroup = invitePayload(invite)
   const seed = await creatorContext.newPage()
   await seed.goto(
-    `${HARNESS_PATH}?room=${invitePayload.room}&key=${invitePayload.key}&relay=${invitePayload.relay}`,
+    `${HARNESS_PATH}?room=${inviteGroup.room}&key=${inviteGroup.key}&relay=${inviteGroup.relay}`,
   )
   await seed.waitForFunction(() => document.documentElement.dataset.ready === 'true')
   await expect(seed.getByTestId('sync-status')).toHaveAttribute('data-status', 'connected')
-  const entryId = await seed.evaluate(() =>
-    window.harness.addEntry({ note: 'dinner before you joined', amountPaise: 90_000 }),
-  )
+  const entryId = await seed.evaluate(async () => {
+    // The harness announces itself as a Member first, so the app admits its
+    // Entries: an Entry from a device that never joined is ignored (#8).
+    await window.harness.joinAs('Seed')
+
+    return window.harness.addEntry({ note: 'dinner before you joined', amountPaise: 90_000 })
+  })
   await expect(seed.locator(`[data-entry-id="${entryId}"]`)).toBeVisible()
 
   const friendContext = await browser.newContext()

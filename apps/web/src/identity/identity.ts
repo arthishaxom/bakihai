@@ -17,6 +17,7 @@ import {
   uuidv7,
   verifyBytes,
 } from '@bakihai/shared'
+import { loadDeviceKey, saveDeviceKey } from './device-keys'
 
 /** Storage key of the device's Group identity. */
 const IDENTITY_STORAGE_KEY = 'bakihai/identity'
@@ -26,9 +27,9 @@ const IDENTITY_VERSION = 1
 
 /**
  * Everything this phone needs to be a Member: which Group it belongs to, the
- * Group secret, and its own device keys (ADR-0002). The private key is stored
- * as PKCS8 so it survives a reload; the live key used for signing is imported
- * non-extractable.
+ * Group secret, and its own device keys (ADR-0002). The signing key lives in
+ * IndexedDB as a non-extractable `CryptoKey`; `privateKeyPkcs8` survives only
+ * on installs made before that, and is migrated away on first use (#8).
  */
 export interface Identity {
   version: typeof IDENTITY_VERSION
@@ -42,8 +43,8 @@ export interface Identity {
   displayName: string
   /** Device public key, unpadded base64url. */
   signerPublicKey: string
-  /** Device private key as PKCS8, unpadded base64url. */
-  privateKeyPkcs8: string
+  /** Legacy PKCS8 of the device private key, unpadded base64url. */
+  privateKeyPkcs8?: string
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -81,7 +82,7 @@ function parseIdentity(value: unknown): Identity | null {
     !isNonEmptyString(record.deviceId) ||
     !isNonEmptyString(record.displayName) ||
     !isBase64UrlOfByteLength(record.signerPublicKey, SIGNING_PUBLIC_KEY_BYTES) ||
-    !isNonEmptyString(record.privateKeyPkcs8)
+    (record.privateKeyPkcs8 !== undefined && !isNonEmptyString(record.privateKeyPkcs8))
   ) {
     return null
   }
@@ -95,7 +96,7 @@ function parseIdentity(value: unknown): Identity | null {
     deviceId: record.deviceId,
     displayName: record.displayName,
     signerPublicKey: record.signerPublicKey,
-    privateKeyPkcs8: record.privateKeyPkcs8,
+    ...(record.privateKeyPkcs8 === undefined ? {} : { privateKeyPkcs8: record.privateKeyPkcs8 }),
   }
 }
 
@@ -145,16 +146,27 @@ async function newIdentity(input: NewIdentityInput): Promise<Identity> {
   }
 
   const keys = await generateStorableSigningKeyPair()
+  const deviceId = uuidv7()
+  let legacyPrivateKeyPkcs8: string | undefined
+
+  try {
+    await saveDeviceKey(deviceId, keys.privateKey)
+  } catch {
+    // A browser without usable IndexedDB keeps the storable PKCS8 form, which
+    // is what this app shipped before device keys moved (#8).
+    legacyPrivateKeyPkcs8 = keys.privateKeyPkcs8
+  }
+
   const identity: Identity = {
     version: IDENTITY_VERSION,
     groupId: input.groupId,
     groupName,
     relayUrl: input.relayUrl,
     groupKey: input.groupKey,
-    deviceId: uuidv7(),
+    deviceId,
     displayName,
     signerPublicKey: await exportSigningPublicKey(keys.publicKey),
-    privateKeyPkcs8: keys.privateKeyPkcs8,
+    ...(legacyPrivateKeyPkcs8 === undefined ? {} : { privateKeyPkcs8: legacyPrivateKeyPkcs8 }),
   }
 
   saveIdentity(identity)
@@ -193,17 +205,45 @@ const IDENTITY_PROBE = new TextEncoder().encode('bakihai/identity-probe/v1') as 
 /**
  * Restores the device's signing keys and checks that they are a pair, so a
  * half-written or tampered identity fails loudly instead of signing Entries
- * that no one can verify.
+ * that no one can verify. A key stored as PKCS8 by an older install is moved
+ * into IndexedDB and dropped from local storage on the way through (#8).
  */
 export async function importDeviceSigningKey(identity: Identity): Promise<CryptoKey> {
-  const [privateKey, publicKey] = await Promise.all([
-    importSigningPrivateKey(identity.privateKeyPkcs8),
-    importSigningPublicKey(identity.signerPublicKey),
-  ])
+  const privateKey =
+    (await loadDeviceKey(identity.deviceId).catch(() => null)) ??
+    (await migrateLegacyDeviceKey(identity))
+
+  if (!privateKey) {
+    throw new Error('This device has no signing key; join the Group again from an invite link')
+  }
+
+  const publicKey = await importSigningPublicKey(identity.signerPublicKey)
   const signature = await signBytes(privateKey, IDENTITY_PROBE)
 
   if (!(await verifyBytes(publicKey, signature, IDENTITY_PROBE))) {
     throw new Error('Stored device key does not match the stored public key')
+  }
+
+  return privateKey
+}
+
+/** Moves a legacy PKCS8 key out of local storage, returning it for this session. */
+async function migrateLegacyDeviceKey(identity: Identity): Promise<CryptoKey | null> {
+  if (!identity.privateKeyPkcs8) {
+    return null
+  }
+
+  const privateKey = await importSigningPrivateKey(identity.privateKeyPkcs8)
+
+  try {
+    await saveDeviceKey(identity.deviceId, privateKey)
+
+    const stripped: Identity = { ...identity }
+
+    delete stripped.privateKeyPkcs8
+    saveIdentity(stripped)
+  } catch {
+    // Without IndexedDB the key stays where it was; migration is retried next time.
   }
 
   return privateKey

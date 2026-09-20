@@ -1,9 +1,4 @@
-import {
-  buildInviteUrl,
-  type EntryEnvelope,
-  MEMBER_ENTRY_TYPE,
-  type SyncStatus,
-} from '@bakihai/shared'
+import { buildInviteUrl, MEMBER_ENTRY_TYPE, type SyncStatus } from '@bakihai/shared'
 import { useMemo, useState } from 'react'
 import { AddExpenseForm } from '../book/AddExpenseForm'
 import { describeBalance, describeEntry, formatOccurredAt } from '../book/summaries'
@@ -41,18 +36,16 @@ export function BookPage() {
 }
 
 function BookScreen({ identity }: { identity: Identity }) {
-  const { entries, members, balances, status, error, writeExpense } = useBook(identity)
+  const { entries, members, balances, status, error, ready, writeExpense } = useBook(identity)
   const inviteUrl = buildInviteUrl(window.location.origin, inviteForIdentity(identity))
   const [copied, setCopied] = useState(false)
-  // The book arrives from other devices, so treat it as untrusted: show only
-  // Entries this app version knows how to render (#8 hardens ingest).
+  // useBook hands over only accepted Entries, so the ledger just leaves out
+  // the Member Entries that announce the roster itself and orders the rest
+  // newest first.
   const ledgerEntries = useMemo(
     () =>
       entries
-        .filter(
-          (entry: EntryEnvelope) =>
-            entry.type !== MEMBER_ENTRY_TYPE && typeof entry.occurredAt === 'string',
-        )
+        .filter((entry) => entry.type !== MEMBER_ENTRY_TYPE)
         .sort(
           (left, right) =>
             compareTextDesc(left.occurredAt, right.occurredAt) ||
@@ -61,8 +54,8 @@ function BookScreen({ identity }: { identity: Identity }) {
     [entries],
   )
   const memberIds = useMemo(() => new Set(members.map((member) => member.deviceId)), [members])
-  // Balances are between Members; anything else in the book is not this
-  // Group's business until ingest verification lands (#8).
+  // Balances are between Members: an accepted Entry can still name someone who
+  // is not in the roster, and a Balance with them is not this Group's business.
   const visibleBalances = balances.filter(
     (balance) => memberIds.has(balance.debtorDeviceId) && memberIds.has(balance.creditorDeviceId),
   )
@@ -108,6 +101,9 @@ function BookScreen({ identity }: { identity: Identity }) {
               ) : null}
             </li>
           ))}
+          {ready && members.length === 0 ? (
+            <li className="text-muted-foreground">No members yet.</li>
+          ) : null}
         </ul>
       </section>
 
@@ -115,11 +111,7 @@ function BookScreen({ identity }: { identity: Identity }) {
         <h2 id="balances-heading" className="font-semibold text-lg">
           Balances
         </h2>
-        {visibleBalances.length === 0 ? (
-          <p data-testid="no-balances" className="text-muted-foreground">
-            No balances.
-          </p>
-        ) : (
+        {visibleBalances.length > 0 ? (
           <ul data-testid="balance-list" className="flex flex-col gap-1">
             {visibleBalances.map((balance) => (
               <li
@@ -131,7 +123,11 @@ function BookScreen({ identity }: { identity: Identity }) {
               </li>
             ))}
           </ul>
-        )}
+        ) : ready ? (
+          <p data-testid="no-balances" className="text-muted-foreground">
+            No balances yet.
+          </p>
+        ) : null}
       </section>
 
       <AddExpenseForm
@@ -144,9 +140,7 @@ function BookScreen({ identity }: { identity: Identity }) {
         <h2 id="entries-heading" className="font-semibold text-lg">
           Entries
         </h2>
-        {ledgerEntries.length === 0 ? (
-          <p className="text-muted-foreground">No entries yet.</p>
-        ) : (
+        {ledgerEntries.length > 0 ? (
           <ul data-testid="entry-list" className="flex flex-col gap-1">
             {ledgerEntries.map((entry) => (
               <li key={entry.id} data-entry-id={entry.id} data-entry-type={entry.type}>
@@ -157,7 +151,9 @@ function BookScreen({ identity }: { identity: Identity }) {
               </li>
             ))}
           </ul>
-        )}
+        ) : ready ? (
+          <p className="text-muted-foreground">No entries yet. Add the first expense above.</p>
+        ) : null}
       </section>
 
       <section className="flex flex-col gap-2" aria-labelledby="invite-heading">

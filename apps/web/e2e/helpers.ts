@@ -1,5 +1,20 @@
 import { expect, type Page } from '@playwright/test'
 
+/** The decoded contents of an invite link's `#invite=` fragment. */
+export interface InvitePayload {
+  room: string
+  key: string
+  relay: string
+  name: string
+}
+
+/** Decodes an invite link's `#invite=` fragment. */
+export function invitePayload(inviteUrl: string): InvitePayload {
+  const payload = new URL(inviteUrl).hash.replace('#invite=', '')
+
+  return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as InvitePayload
+}
+
 /** Creates a Group on this device and returns its invite link. */
 export async function createGroup(
   page: Page,
@@ -31,4 +46,12 @@ export function memberNames(page: Page): Promise<string[]> {
     .getByTestId('member-list')
     .locator('li')
     .evaluateAll((items) => items.map((item) => item.getAttribute('data-member-name') ?? ''))
+}
+
+/** The text of each Balance row on a device, in fold order. */
+export function balanceTexts(page: Page): Promise<string[]> {
+  return page
+    .getByTestId('balance-list')
+    .locator('li')
+    .evaluateAll((items) => items.map((item) => item.textContent?.trim() ?? ''))
 }

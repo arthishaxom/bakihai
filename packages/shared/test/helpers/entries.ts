@@ -6,6 +6,7 @@ import {
   type UnsignedEntryEnvelope,
 } from '../../src/entry-envelope'
 import { type CreateExpenseEntryInput, createExpenseEntry } from '../../src/group/expenses'
+import { MEMBER_ENTRY_TYPE, memberEntryPayloadSchema } from '../../src/group/members'
 import { uuidv7 } from '../../src/uuidv7'
 
 /** Builds a real signed Entry for tests, with optional field overrides. */
@@ -65,4 +66,37 @@ export function makeExpenseEntry(
     payerDeviceId: device.deviceId,
     ...payload,
   })
+}
+
+let entryClock = 0
+
+/** A fresh Entry id that sorts after every id this helper has minted before. */
+function nextEntryId(): string {
+  entryClock += 1
+
+  return uuidv7(entryClock)
+}
+
+/**
+ * Builds a signed Member Entry as `device`. Ids increase with each call, so
+ * tests that settle competing claims get a deterministic binding order without
+ * waiting on the wall clock.
+ */
+export function makeMemberEntry(
+  device: TestDevice,
+  displayName: string,
+  occurredAt = '2026-09-20T10:00:00.000Z',
+): Promise<EntryEnvelope> {
+  return signEntryEnvelope(
+    {
+      id: nextEntryId(),
+      schemaVersion: ENTRY_SCHEMA_VERSION,
+      authorDeviceId: device.deviceId,
+      signerPublicKey: device.signerPublicKey,
+      occurredAt,
+      type: MEMBER_ENTRY_TYPE,
+      payload: memberEntryPayloadSchema.parse({ displayName }),
+    },
+    device.keyPair.privateKey,
+  )
 }

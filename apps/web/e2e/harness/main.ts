@@ -1,7 +1,9 @@
 import {
   BookSyncProvider,
   createBookDoc,
+  createMemberEntry,
   ENTRY_SCHEMA_VERSION,
+  type EntryEnvelope,
   entriesMap,
   exportSigningPublicKey,
   fromBase64Url,
@@ -9,6 +11,7 @@ import {
   putEntry,
   readEntries,
   signEntryEnvelope,
+  type UnsignedEntryEnvelope,
   uuidv7,
 } from '@bakihai/shared'
 import { persistBook } from '../../src/book/persistence'
@@ -22,6 +25,20 @@ interface HarnessEntry {
 
 interface HarnessApi {
   addEntry(input: { note: string; amountPaise: number }): Promise<string>
+  /** Announces this harness device as a Member, so the app admits its Entries. */
+  joinAs(displayName: string): Promise<string>
+  /** Writes arbitrary JSON into the book at `key`, as a modified client would. */
+  injectRaw(key: string, value: unknown): void
+  /** Signs an Entry as `authorDeviceId` with a fresh key, forging authorship. */
+  addForgedEntry(input: {
+    authorDeviceId: string
+    type: string
+    payload: UnsignedEntryEnvelope['payload']
+  }): Promise<string>
+  /** Every raw value in the book, including anything malformed. */
+  entryValues(): unknown[]
+  /** A fresh Entry id, for tests that mint an envelope outside `putEntry`. */
+  newId(): string
   entries(): HarnessEntry[]
   errors(): string[]
   status(): string
@@ -171,6 +188,47 @@ window.harness = {
 
     return entry.id
   },
+  async joinAs(displayName) {
+    const entry = await createMemberEntry({
+      deviceId,
+      signerPublicKey,
+      privateKey: deviceKeys.privateKey,
+      displayName,
+    })
+
+    putEntry(doc, entry)
+    render()
+
+    return entry.id
+  },
+  injectRaw(key, value) {
+    entriesMap(doc).set(key, value as EntryEnvelope)
+    render()
+  },
+  async addForgedEntry(input) {
+    // A fresh key signs an Entry that claims someone else's device id; the
+    // signature itself is real, so only roster binding can reject it.
+    const forgedKeys = await generateSigningKeyPair()
+    const entry = await signEntryEnvelope(
+      {
+        id: uuidv7(),
+        schemaVersion: ENTRY_SCHEMA_VERSION,
+        authorDeviceId: input.authorDeviceId,
+        signerPublicKey: await exportSigningPublicKey(forgedKeys.publicKey),
+        occurredAt: new Date().toISOString(),
+        type: input.type,
+        payload: input.payload,
+      },
+      forgedKeys.privateKey,
+    )
+
+    putEntry(doc, entry)
+    render()
+
+    return entry.id
+  },
+  entryValues: () => [...entriesMap(doc).values()] as unknown[],
+  newId: () => uuidv7(),
   entries,
   errors: () => [...errors],
   status: () => provider.status,

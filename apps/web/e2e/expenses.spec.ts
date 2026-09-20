@@ -1,12 +1,5 @@
 import { expect, type Page, test } from '@playwright/test'
-import { createGroup, joinGroup, memberNames } from './helpers'
-
-function balanceTexts(page: Page): Promise<string[]> {
-  return page
-    .getByTestId('balance-list')
-    .locator('li')
-    .evaluateAll((items) => items.map((item) => item.textContent?.trim() ?? ''))
-}
+import { balanceTexts, createGroup, joinGroup, memberNames } from './helpers'
 
 /** One Member's pill in the Add Expense form, addressed by display name. */
 function pill(page: Page, name: string) {

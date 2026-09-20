@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import type { EntryEnvelope } from './entry-envelope'
+import { type EntryEnvelope, entryEnvelopeSchema } from './entry-envelope'
 
 /** Name of the Y.Map that holds a Group's Entries inside its book document. */
 export const BOOK_ENTRIES_MAP = 'entries'
@@ -35,7 +35,24 @@ export function putEntry(doc: Y.Doc, entry: EntryEnvelope): void {
   map.set(entry.id, entry)
 }
 
-/** Reads every Entry in the book. Map order is not meaningful; callers sort. */
+/**
+ * Reads every well-formed Entry in the book, at most one per Entry id. The
+ * book is untrusted input: a peer with the Group key can write anything into
+ * the shared map, so values that are not Entries this app version understands
+ * — or that sit under a key that is not the Entry's own id, which is how one
+ * Entry could otherwise be counted twice — are left out here rather than
+ * reaching a fold or a screen (#8). Map order is not meaningful; callers sort.
+ */
 export function readEntries(doc: Y.Doc): EntryEnvelope[] {
-  return [...entriesMap(doc).values()]
+  const entries: EntryEnvelope[] = []
+
+  for (const [key, value] of entriesMap(doc).entries()) {
+    const parsed = entryEnvelopeSchema.safeParse(value)
+
+    if (parsed.success && parsed.data.id === key) {
+      entries.push(parsed.data)
+    }
+  }
+
+  return entries
 }
