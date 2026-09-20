@@ -50,7 +50,7 @@ function required(name: string): string {
 
 const room = required('room')
 const groupKey = fromBase64Url(required('key'))
-const relayUrl = params.get('relay') ?? 'http://localhost:8787'
+const relayUrl = params.get('relay') ?? 'http://localhost:8790'
 const autoconnect = params.get('autoconnect') !== '0'
 
 const doc = createBookDoc()

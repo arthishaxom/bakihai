@@ -33,7 +33,7 @@ export interface BookSyncProviderOptions {
   groupKey: GroupKey
   /** Relay room for the Group — the Group id in the app. */
   room: string
-  /** Relay origin, e.g. `https://relay.bakihai.apothal.dev` or `http://localhost:8787`. */
+  /** Relay origin, e.g. `https://relay.bakihai.apothal.dev` or `http://localhost:8790`. */
   relayUrl: string
   /** Whether to open the connection immediately. Defaults to true. */
   connect?: boolean

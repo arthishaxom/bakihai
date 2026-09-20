@@ -34,8 +34,8 @@ function sleep(ms: number): Promise<void> {
 
 describe('relaySocketUrl', () => {
   it('builds the PartyServer room URL and keeps the relay origin scheme', () => {
-    expect(relaySocketUrl('http://localhost:8787', 'group 1')).toBe(
-      'ws://localhost:8787/parties/book-room/group%201',
+    expect(relaySocketUrl('http://localhost:8790', 'group 1')).toBe(
+      'ws://localhost:8790/parties/book-room/group%201',
     )
     expect(relaySocketUrl('https://relay.example', 'g1')).toBe(
       'wss://relay.example/parties/book-room/g1',

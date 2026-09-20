@@ -1,5 +1,5 @@
 const PRODUCTION_RELAY_URL = 'https://relay.bakihai.apothal.dev'
-const LOCAL_RELAY_URL = 'http://localhost:8787'
+const LOCAL_RELAY_URL = 'http://localhost:8790'
 
 /**
  * The relay a newly created Group starts on. Deploys and the e2e build set

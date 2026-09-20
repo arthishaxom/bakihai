@@ -18,8 +18,8 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'pnpm --filter @bakihai/relay exec wrangler dev --port 8787',
-      url: 'http://localhost:8787/health',
+      command: 'pnpm --filter @bakihai/relay exec wrangler dev --port 8790',
+      url: 'http://localhost:8790/health',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
@@ -27,7 +27,7 @@ export default defineConfig({
       // The e2e build bakes in the locally running relay; a deploy uses the
       // production relay URL from the build environment instead.
       command:
-        'VITE_E2E=1 VITE_RELAY_URL=http://localhost:8787 pnpm build && pnpm preview --strictPort',
+        'VITE_E2E=1 VITE_RELAY_URL=http://localhost:8790 pnpm build && pnpm preview --strictPort',
       url: 'http://localhost:4173',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

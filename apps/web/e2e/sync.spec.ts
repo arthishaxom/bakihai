@@ -6,7 +6,7 @@ interface Group {
   key: string
 }
 
-const RELAY_URL = 'http://localhost:8787'
+const RELAY_URL = 'http://localhost:8790'
 const HARNESS_PATH = '/e2e/harness/harness.html'
 // Mirrored from packages/shared on purpose: the wire-format test re-derives
 // the key and opens the frames itself, so it fails if those constants drift.
