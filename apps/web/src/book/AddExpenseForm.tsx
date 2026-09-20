@@ -1,8 +1,15 @@
-import { parseRupeesToPaise } from '@bakihai/shared'
+import { type ExpenseShare, parseRupeesToPaise, splitExpense } from '@bakihai/shared'
 import { type FormEvent, useState } from 'react'
 import type { ExpenseDraft } from './session'
+import { describeShares, formatRupees } from './summaries'
 
 const INPUT_CLASSES = 'rounded-md border border-foreground/20 bg-transparent px-3 py-2 text-base'
+
+// The pill is a label around a real checkbox: the checkbox keeps its keyboard
+// and screen-reader semantics, stretched invisibly over the pill so the whole
+// shape is the hit target, and :checked / :focus-visible style the label.
+const PILL_CLASSES =
+  'relative inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-foreground/20 px-3 py-1.5 text-sm transition-colors has-[:checked]:border-foreground has-[:checked]:bg-foreground has-[:checked]:text-background has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-foreground'
 
 interface RosterEntry {
   deviceId: string
@@ -11,9 +18,10 @@ interface RosterEntry {
 
 /**
  * The Add Expense form: amount in rupees (stored in paise, ADR-0008), a payer,
- * and the Members sharing the cost, equal by default. Unticking the payer is
- * how a Member treats the others. The writer is this device's Member unless
- * they pick someone else.
+ * and the Members sharing the cost, equal by default. Unticking the payer
+ * records them fronting a cost the others still owe; a cost nobody else shares
+ * moves no Balance and is never written. The writer is this device's Member
+ * unless they pick someone else.
  */
 export function AddExpenseForm({
   members,
@@ -39,7 +47,29 @@ export function AddExpenseForm({
     ? members
     : [viewer, ...members]
   const participants = roster.filter((member) => !excludedIds.has(member.deviceId))
-  const canSubmit = participants.length > 0 && amount.trim().length > 0 && !submitting
+  const payerName =
+    roster.find((member) => member.deviceId === payerDeviceId)?.displayName ?? 'Someone'
+  const enteredPaise = parseRupeesToPaise(amount)
+  const amountPaise = enteredPaise !== null && enteredPaise > 0 ? enteredPaise : null
+  // The same equal-split arithmetic the Balances fold uses (ADR-0008), so the
+  // preview's remainder paise are the shares every device will fold.
+  const shares: ExpenseShare[] =
+    amountPaise !== null && participants.length > 0
+      ? splitExpense(
+          amountPaise,
+          participants.map((member) => member.deviceId),
+        )
+      : []
+  const shareByDeviceId = new Map<string, number>()
+
+  for (const share of shares) {
+    shareByDeviceId.set(share.deviceId, share.amountPaise)
+  }
+
+  const payerAlone =
+    participants.length > 0 && participants.every((member) => member.deviceId === payerDeviceId)
+  const nobodyShares = participants.length === 0
+  const canSubmit = !payerAlone && !nobodyShares && amount.trim().length > 0 && !submitting
 
   function toggleParticipant(deviceId: string, checked: boolean): void {
     setExcludedIds((current) => {
@@ -58,9 +88,14 @@ export function AddExpenseForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    const amountPaise = parseRupeesToPaise(amount)
+    // The submit button is disabled for these, but the form stays the gate so
+    // no Entry is written either way. The schema and the fold stay permissive,
+    // so Entries from other app versions still fold cleanly.
+    if (payerAlone || nobodyShares) {
+      return
+    }
 
-    if (amountPaise === null || amountPaise === 0) {
+    if (amountPaise === null) {
       setError('Enter an amount in rupees, like 250 or 99.50')
       return
     }
@@ -118,19 +153,50 @@ export function AddExpenseForm({
             ))}
           </select>
         </label>
-        <fieldset className="flex flex-col gap-1 text-sm">
-          <legend>Split between</legend>
-          {roster.map((member) => (
-            <label key={member.deviceId} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={!excludedIds.has(member.deviceId)}
-                onChange={(event) => toggleParticipant(member.deviceId, event.target.checked)}
-              />
-              {member.displayName}
-              {member.deviceId === viewer.deviceId ? ' (you)' : ''}
-            </label>
-          ))}
+        <fieldset className="flex flex-col gap-2 text-sm">
+          <legend>Split equally between</legend>
+          <div className="flex flex-wrap gap-2">
+            {roster.map((member) => {
+              const sharePaise = shareByDeviceId.get(member.deviceId)
+
+              return (
+                <label
+                  key={member.deviceId}
+                  data-participant-name={member.displayName}
+                  data-share-paise={sharePaise}
+                  className={PILL_CLASSES}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!excludedIds.has(member.deviceId)}
+                    onChange={(event) => toggleParticipant(member.deviceId, event.target.checked)}
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                  />
+                  <span className="pointer-events-none flex items-baseline gap-1.5">
+                    {member.displayName}
+                    {member.deviceId === viewer.deviceId ? (
+                      <span className="opacity-70">(you)</span>
+                    ) : null}
+                    {sharePaise === undefined ? null : (
+                      <span className="font-medium tabular-nums">{formatRupees(sharePaise)}</span>
+                    )}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+          {amountPaise !== null && shares.length > 0 && !payerAlone ? (
+            <p data-testid="split-summary" className="text-muted-foreground">
+              {describeShares({ payerDeviceId, amountPaise, shares, members: roster })}
+            </p>
+          ) : null}
+          {payerAlone || nobodyShares ? (
+            <p data-testid="split-explanation" role="status" className="text-red-600">
+              {nobodyShares
+                ? 'Nobody is in the split. Select at least one Member to share the cost.'
+                : `Only ${payerName} is in the split, so nothing is owed. Select someone else to share the cost.`}
+            </p>
+          ) : null}
         </fieldset>
         {error ? (
           <p role="alert" className="text-sm text-red-600">

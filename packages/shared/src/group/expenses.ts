@@ -8,9 +8,9 @@ export const EXPENSE_ENTRY_TYPE = 'expense'
 /**
  * The payload of an Expense Entry: a payer, the Members sharing the cost, and
  * the amount in integer paise (ADR-0008). The payer is a participant when they
- * share the cost and omitted when treating the others; either way every device
- * computes the same equal split from this Entry, so no per-Member shares are
- * stored.
+ * share the cost and omitted when fronting a cost the others owe; either way
+ * every device computes the same equal split from this Entry, so no per-Member
+ * shares are stored.
  */
 export const expenseEntryPayloadSchema = z.strictObject({
   amountPaise: z.int().positive(),
