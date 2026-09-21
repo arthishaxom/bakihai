@@ -5,7 +5,10 @@ import {
   type ExpenseShare,
   expenseEntryPayloadSchema,
   formatPaiseAsRupees,
+  MEMBER_ENTRY_TYPE,
   type Member,
+  readVoidPayload,
+  VOID_ENTRY_TYPE,
 } from '@bakihai/shared'
 
 export function formatRupees(amountPaise: number): string {
@@ -25,24 +28,73 @@ export function formatOccurredAt(occurredAt: string): string {
 /** Just enough of a Member to read their name in a summary. */
 type NamedMember = Pick<Member, 'deviceId' | 'displayName'>
 
-function displayNameFor(members: NamedMember[], deviceId: string): string | undefined {
-  return members.find((member) => member.deviceId === deviceId)?.displayName
+/** The name a Member reads as, or "Someone" while the roster has not caught up. */
+export function nameFor(members: NamedMember[], deviceId: string): string {
+  return members.find((member) => member.deviceId === deviceId)?.displayName ?? 'Someone'
 }
 
-/** What an Entry reads as in the book: real Expenses get money, the rest their type. */
-export function describeEntry(entry: EntryEnvelope, members: Member[]): string {
+/**
+ * What an Entry reads as in the book: real Expenses get money, a Void names
+ * what it Voided, and the rest read as their type. A Void's `voidTarget` is
+ * the Entry it names, when that Entry is in this book.
+ */
+export function describeEntry(
+  entry: EntryEnvelope,
+  members: Member[],
+  voidTarget?: EntryEnvelope,
+): string {
+  if (entry.type === VOID_ENTRY_TYPE) {
+    return describeVoid(entry, voidTarget, members)
+  }
+
   const expense = expenseEntryPayloadSchema.safeParse(entry.payload)
 
   if (entry.type === EXPENSE_ENTRY_TYPE && expense.success) {
-    const payer = displayNameFor(members, expense.data.payerDeviceId) ?? 'Someone'
-    const sharers = expense.data.participantDeviceIds.map(
-      (deviceId) => displayNameFor(members, deviceId) ?? 'Someone',
-    )
+    const payer = nameFor(members, expense.data.payerDeviceId)
+    const sharers = expense.data.participantDeviceIds.map((deviceId) => nameFor(members, deviceId))
 
     return `${payer} paid ${formatRupees(expense.data.amountPaise)} · split between ${sharers.join(', ')}`
   }
 
   return entry.type
+}
+
+/**
+ * What a Void reads as in the book: who Voided what. The reason stays on the
+ * Voided line, where it reads next to what it explains.
+ */
+export function describeVoid(
+  voidEntry: EntryEnvelope,
+  target: EntryEnvelope | undefined,
+  members: Member[],
+): string {
+  const voider = nameFor(members, voidEntry.authorDeviceId)
+
+  if (!readVoidPayload(voidEntry)) {
+    return `${voider} voided an Entry`
+  }
+
+  if (!target) {
+    return `${voider} voided an Entry that is not in this book`
+  }
+
+  if (target.type === MEMBER_ENTRY_TYPE) {
+    return `${voider} voided a Member Entry, which is ignored`
+  }
+
+  if (target.type === VOID_ENTRY_TYPE) {
+    return `${voider} voided a Void, which is ignored`
+  }
+
+  return `${voider} voided “${describeEntry(target, members)}”`
+}
+
+/** The annotation a Voided line carries: who Voided it, and why. */
+export function describeVoidedBy(voidEntry: EntryEnvelope, members: Member[]): string {
+  const voider = nameFor(members, voidEntry.authorDeviceId)
+  const reason = readVoidPayload(voidEntry)?.reason
+
+  return reason ? `Voided by ${voider} — ${reason}` : `Voided by ${voider}`
 }
 
 /** Joins names the way the book reads: "Mira", "Mira and Sam", "Mira, Sam and Kabir". */
@@ -68,8 +120,8 @@ export function describeShares(input: {
   shares: ExpenseShare[]
   members: NamedMember[]
 }): string {
-  const nameFor = (deviceId: string) => displayNameFor(input.members, deviceId) ?? 'Someone'
-  const paid = `${nameFor(input.payerDeviceId)} paid ${formatRupees(input.amountPaise)}`
+  const nameOf = (deviceId: string) => nameFor(input.members, deviceId)
+  const paid = `${nameOf(input.payerDeviceId)} paid ${formatRupees(input.amountPaise)}`
   const [first] = input.shares
 
   if (!first) {
@@ -84,15 +136,15 @@ export function describeShares(input: {
     const [only] = others
 
     if (others.length === 1 && only) {
-      return `${paid} · ${nameFor(only.deviceId)} owes ${formatRupees(only.amountPaise)}`
+      return `${paid} · ${nameOf(only.deviceId)} owes ${formatRupees(only.amountPaise)}`
     }
 
     if (allSharesEqual) {
-      return `${paid} · ${joinNames(others.map((share) => nameFor(share.deviceId)))} each owe ${formatRupees(first.amountPaise)}`
+      return `${paid} · ${joinNames(others.map((share) => nameOf(share.deviceId)))} each owe ${formatRupees(first.amountPaise)}`
     }
 
     return `${paid} · ${others
-      .map((share) => `${nameFor(share.deviceId)} owes ${formatRupees(share.amountPaise)}`)
+      .map((share) => `${nameOf(share.deviceId)} owes ${formatRupees(share.amountPaise)}`)
       .join(', ')}`
   }
 
@@ -101,7 +153,7 @@ export function describeShares(input: {
   }
 
   return `${paid} · ${input.shares
-    .map((share) => `${nameFor(share.deviceId)} ${formatRupees(share.amountPaise)}`)
+    .map((share) => `${nameOf(share.deviceId)} ${formatRupees(share.amountPaise)}`)
     .join(', ')}`
 }
 
@@ -111,8 +163,8 @@ export function describeBalance(
   members: Member[],
   viewerDeviceId: string,
 ): string {
-  const debtor = displayNameFor(members, balance.debtorDeviceId) ?? 'Someone'
-  const creditor = displayNameFor(members, balance.creditorDeviceId) ?? 'Someone'
+  const debtor = nameFor(members, balance.debtorDeviceId)
+  const creditor = nameFor(members, balance.creditorDeviceId)
   const amount = formatRupees(balance.amountPaise)
 
   if (balance.debtorDeviceId === viewerDeviceId) {

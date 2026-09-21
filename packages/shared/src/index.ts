@@ -78,6 +78,17 @@ export {
   type MemberEntryPayload,
   memberEntryPayloadSchema,
 } from './group/members'
+export {
+  type CreateVoidEntryInput,
+  canVoidEntry,
+  createVoidEntry,
+  foldVoids,
+  readVoidPayload,
+  VOID_ENTRY_TYPE,
+  VOID_REASON_MAX_LENGTH,
+  type VoidEntryPayload,
+  voidEntryPayloadSchema,
+} from './group/voids'
 export { formatPaiseAsRupees, parseRupeesToPaise } from './money'
 export {
   frameForSealedUpdate,

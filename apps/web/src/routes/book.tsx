@@ -1,7 +1,19 @@
-import { buildInviteUrl, MEMBER_ENTRY_TYPE, type SyncStatus } from '@bakihai/shared'
+import {
+  buildInviteUrl,
+  type EntryEnvelope,
+  MEMBER_ENTRY_TYPE,
+  readVoidPayload,
+  type SyncStatus,
+} from '@bakihai/shared'
 import { useMemo, useState } from 'react'
 import { AddExpenseForm } from '../book/AddExpenseForm'
-import { describeBalance, describeEntry, formatOccurredAt } from '../book/summaries'
+import { EntryDetailSheet } from '../book/EntryDetailSheet'
+import {
+  describeBalance,
+  describeEntry,
+  describeVoidedBy,
+  formatOccurredAt,
+} from '../book/summaries'
 import { useBook } from '../book/useBook'
 import { type Identity, inviteForIdentity, loadIdentity } from '../identity/identity'
 
@@ -36,9 +48,20 @@ export function BookPage() {
 }
 
 function BookScreen({ identity }: { identity: Identity }) {
-  const { entries, members, balances, status, error, ready, writeExpense } = useBook(identity)
+  const {
+    entries,
+    members,
+    balances,
+    voidsByTargetId,
+    status,
+    error,
+    ready,
+    writeExpense,
+    writeVoid,
+  } = useBook(identity)
   const inviteUrl = buildInviteUrl(window.location.origin, inviteForIdentity(identity))
   const [copied, setCopied] = useState(false)
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   // useBook hands over only accepted Entries, so the ledger just leaves out
   // the Member Entries that announce the roster itself and orders the rest
   // newest first.
@@ -59,6 +82,16 @@ function BookScreen({ identity }: { identity: Identity }) {
   const visibleBalances = balances.filter(
     (balance) => memberIds.has(balance.debtorDeviceId) && memberIds.has(balance.creditorDeviceId),
   )
+  const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
+  const selectedEntry = selectedEntryId === null ? undefined : entriesById.get(selectedEntryId)
+  const selectedTarget =
+    selectedEntry === undefined ? undefined : lookupVoidTarget(selectedEntry, entriesById)
+  const selectedVoid =
+    selectedEntry === undefined ? undefined : voidsByTargetId.get(selectedEntry.id)
+
+  function openEntry(entry: EntryEnvelope): void {
+    setSelectedEntryId(entry.id)
+  }
 
   async function copyInvite(): Promise<void> {
     try {
@@ -142,14 +175,36 @@ function BookScreen({ identity }: { identity: Identity }) {
         </h2>
         {ledgerEntries.length > 0 ? (
           <ul data-testid="entry-list" className="flex flex-col gap-1">
-            {ledgerEntries.map((entry) => (
-              <li key={entry.id} data-entry-id={entry.id} data-entry-type={entry.type}>
-                <span className="font-medium">{describeEntry(entry, members)}</span>
-                <span className="block text-muted-foreground text-sm">
-                  {formatOccurredAt(entry.occurredAt)}
-                </span>
-              </li>
-            ))}
+            {ledgerEntries.map((entry) => {
+              const voidEntry = voidsByTargetId.get(entry.id)
+
+              return (
+                <li
+                  key={entry.id}
+                  data-entry-id={entry.id}
+                  data-entry-type={entry.type}
+                  data-voided={voidEntry ? 'true' : undefined}
+                >
+                  <button
+                    type="button"
+                    onClick={() => openEntry(entry)}
+                    className="flex min-h-11 w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left"
+                  >
+                    <span className={voidEntry ? 'line-through' : 'font-medium'}>
+                      {describeEntry(entry, members, lookupVoidTarget(entry, entriesById))}
+                    </span>
+                    {voidEntry ? (
+                      <span className="text-muted-foreground text-sm">
+                        {describeVoidedBy(voidEntry, members)}
+                      </span>
+                    ) : null}
+                    <span className="text-muted-foreground text-sm">
+                      {formatOccurredAt(entry.occurredAt)}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         ) : ready ? (
           <p className="text-muted-foreground">No entries yet. Add the first expense above.</p>
@@ -181,6 +236,27 @@ function BookScreen({ identity }: { identity: Identity }) {
           </button>
         </div>
       </section>
+
+      {selectedEntry ? (
+        <EntryDetailSheet
+          entry={selectedEntry}
+          voidTarget={selectedTarget}
+          voidedBy={selectedVoid}
+          members={members}
+          onVoid={writeVoid}
+          onClose={() => setSelectedEntryId(null)}
+        />
+      ) : null}
     </main>
   )
+}
+
+/** The Entry a Void names, when it names one that is in this book. */
+function lookupVoidTarget(
+  entry: EntryEnvelope,
+  entriesById: ReadonlyMap<string, EntryEnvelope>,
+): EntryEnvelope | undefined {
+  const targetId = readVoidPayload(entry)?.targetEntryId
+
+  return targetId === undefined ? undefined : entriesById.get(targetId)
 }

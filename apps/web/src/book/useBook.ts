@@ -6,6 +6,7 @@ import {
   entriesMap,
   foldBalances,
   foldMembers,
+  foldVoids,
   type Member,
   readEntries,
   type SyncStatus,
@@ -13,7 +14,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import type * as Y from 'yjs'
 import type { Identity } from '../identity/identity'
-import { type ExpenseDraft, getBookSession } from './session'
+import { type ExpenseDraft, getBookSession, type VoidDraft } from './session'
 import { useVerifiedEntries } from './useVerifiedEntries'
 
 export interface BookView {
@@ -26,6 +27,12 @@ export interface BookView {
   members: Member[]
   /** Pairwise Balances folded from the book's Expense Entries, zeroes already gone. */
   balances: Balance[]
+  /**
+   * The Void Entries that Void something, keyed by the Voided Entry's id. A
+   * Void naming a Member Entry or another Void is not here, so this map is
+   * exactly what the folds drop.
+   */
+  voidsByTargetId: ReadonlyMap<string, EntryEnvelope>
   status: SyncStatus
   /** Set when this device's identity or book could not be opened. */
   error: unknown
@@ -36,6 +43,8 @@ export interface BookView {
   ready: boolean
   /** Signs and writes an Expense to the local book. */
   writeExpense(input: ExpenseDraft): Promise<void>
+  /** Signs and writes a Void to the local book. */
+  writeVoid(input: VoidDraft): Promise<void>
 }
 
 /** Reads the local book, re-rendering whenever it changes on this or another device. */
@@ -74,15 +83,18 @@ export function useBook(identity: Identity): BookView {
   const entries = useMemo(() => admitEntries(verified.entries), [verified.entries])
   const members = useMemo(() => foldMembers(entries), [entries])
   const balances = useMemo(() => foldBalances(entries), [entries])
+  const voidsByTargetId = useMemo(() => foldVoids(entries), [entries])
 
   return {
     entries,
     members,
     balances,
+    voidsByTargetId,
     status,
     error,
     ready: sessionReady && verified.settled,
     writeExpense: session.writeExpense,
+    writeVoid: session.writeVoid,
   }
 }
 

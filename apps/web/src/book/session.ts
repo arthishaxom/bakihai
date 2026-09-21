@@ -3,6 +3,7 @@ import {
   createBookDoc,
   createExpenseEntry,
   createMemberEntry,
+  createVoidEntry,
   fromBase64Url,
   MEMBER_ENTRY_TYPE,
   putEntry,
@@ -21,6 +22,12 @@ export interface ExpenseDraft {
   participantDeviceIds: string[]
 }
 
+/** The fields a detail sheet decides when correcting an Entry; the session signs and writes it. */
+export interface VoidDraft {
+  targetEntryId: string
+  reason?: string
+}
+
 /** One Group's live book: the document, its local copy, and its relay connection. */
 export interface BookSession {
   doc: Y.Doc
@@ -30,6 +37,8 @@ export interface BookSession {
   ready: Promise<void>
   /** Signs and writes an Expense to the local book; it syncs like any other Entry. */
   writeExpense(input: ExpenseDraft): Promise<void>
+  /** Signs and writes a Void to the local book; it syncs like any other Entry. */
+  writeVoid(input: VoidDraft): Promise<void>
 }
 
 let current: { groupId: string; session: BookSession } | null = null
@@ -77,6 +86,18 @@ function createBookSession(identity: Identity): BookSession {
         signerPublicKey: identity.signerPublicKey,
         privateKey,
         ...input,
+      })
+
+      putEntry(doc, entry)
+    },
+    async writeVoid(input) {
+      const privateKey = await deviceKey()
+      const entry = await createVoidEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        targetEntryId: input.targetEntryId,
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
       })
 
       putEntry(doc, entry)

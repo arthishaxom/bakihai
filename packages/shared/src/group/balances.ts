@@ -1,6 +1,7 @@
 import { compareText } from '../compare'
 import type { EntryEnvelope } from '../entry-envelope'
 import { EXPENSE_ENTRY_TYPE, expenseEntryPayloadSchema, splitExpense } from './expenses'
+import { foldVoids } from './voids'
 
 /**
  * The net position between two Members, always in the direction money moves: a
@@ -43,15 +44,17 @@ function addNet(
  * other across Entries is netted. The result is a pure function of the Entries
  * — the same book yields the same Balances in any order — and pairs that net
  * to zero are left out, so a pair that has squared up never appears. Entries
- * this version cannot read are ignored rather than misread. Settlements will
- * join this sum when they land (P2), so the fold stays the whole book's
- * arithmetic.
+ * this version cannot read are ignored rather than misread. Voided Entries
+ * drop out of the sum entirely, while both lines stay in the book (#12,
+ * ADR-0005). Settlements will join this sum when they land (P2), so the fold
+ * stays the whole book's arithmetic.
  */
 export function foldBalances(entries: EntryEnvelope[]): Balance[] {
   const nets = new Map<string, PairNet>()
+  const voidedByTarget = foldVoids(entries)
 
   for (const entry of entries) {
-    if (entry.type !== EXPENSE_ENTRY_TYPE) {
+    if (entry.type !== EXPENSE_ENTRY_TYPE || voidedByTarget.has(entry.id)) {
       continue
     }
 
