@@ -7,10 +7,13 @@ import {
   foldBalances,
   foldLoans,
   foldMembers,
+  foldSettlements,
+  foldSettlementsAwaitingConfirmation,
   foldVoids,
   type LoanState,
   type Member,
   readEntries,
+  type SettlementState,
   type SyncStatus,
 } from '@bakihai/shared'
 import { useEffect, useMemo, useState } from 'react'
@@ -21,6 +24,8 @@ import {
   getBookSession,
   type LoanDraft,
   type ReturnDraft,
+  type SettlementConfirmDraft,
+  type SettlementDraft,
   type VoidDraft,
 } from './session'
 import { useVerifiedEntries } from './useVerifiedEntries'
@@ -37,6 +42,10 @@ export interface BookView {
   balances: Balance[]
   /** Item states folded from the book's Loan and Return Entries, in Entry id order. */
   loans: LoanState[]
+  /** Settlement states folded from the book's Settlement and Confirm Entries. */
+  settlements: SettlementState[]
+  /** The Settlements still waiting for their receiver's confirmation. */
+  settlementsAwaitingConfirmation: SettlementState[]
   /**
    * The Void Entries that Void something, keyed by the Voided Entry's id. A
    * Void naming a Member Entry or another Void is not here, so this map is
@@ -59,6 +68,10 @@ export interface BookView {
   writeReturn(input: ReturnDraft): Promise<void>
   /** Signs and writes a Void to the local book. */
   writeVoid(input: VoidDraft): Promise<void>
+  /** Signs and writes a Settlement to the local book. */
+  writeSettlement(input: SettlementDraft): Promise<void>
+  /** Signs and writes a Confirm of a Settlement to the local book. */
+  writeSettlementConfirm(input: SettlementConfirmDraft): Promise<void>
 }
 
 /** Reads the local book, re-rendering whenever it changes on this or another device. */
@@ -98,6 +111,11 @@ export function useBook(identity: Identity): BookView {
   const members = useMemo(() => foldMembers(entries), [entries])
   const balances = useMemo(() => foldBalances(entries), [entries])
   const loans = useMemo(() => foldLoans(entries), [entries])
+  const settlements = useMemo(() => foldSettlements(entries), [entries])
+  const settlementsAwaitingConfirmation = useMemo(
+    () => foldSettlementsAwaitingConfirmation(entries),
+    [entries],
+  )
   const voidsByTargetId = useMemo(() => foldVoids(entries), [entries])
 
   return {
@@ -105,6 +123,8 @@ export function useBook(identity: Identity): BookView {
     members,
     balances,
     loans,
+    settlements,
+    settlementsAwaitingConfirmation,
     voidsByTargetId,
     status,
     error,
@@ -113,6 +133,8 @@ export function useBook(identity: Identity): BookView {
     writeLoan: session.writeLoan,
     writeReturn: session.writeReturn,
     writeVoid: session.writeVoid,
+    writeSettlement: session.writeSettlement,
+    writeSettlementConfirm: session.writeSettlementConfirm,
   }
 }
 

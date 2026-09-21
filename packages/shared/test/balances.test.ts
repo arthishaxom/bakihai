@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { foldBalances } from '../src/group/balances'
-import { makeDevice, makeEntry, makeExpenseEntry } from './helpers/entries'
+import { createSettlementEntry } from '../src/group/settlements'
+import { createVoidEntry } from '../src/group/voids'
+import { makeDevice, makeEntry, makeExpenseEntry, type TestDevice } from './helpers/entries'
+
+/** Writes a Settlement as `device`, defaulting the payer to the device itself. */
+function pay(
+  device: TestDevice,
+  payload: { toDeviceId: string; amountPaise: number; fromDeviceId?: string },
+): Promise<Awaited<ReturnType<typeof createSettlementEntry>>> {
+  return createSettlementEntry({
+    deviceId: device.deviceId,
+    signerPublicKey: device.signerPublicKey,
+    privateKey: device.keyPair.privateKey,
+    fromDeviceId: device.deviceId,
+    ...payload,
+  })
+}
 
 describe('foldBalances', () => {
   it('shows each other participant owing the payer their share of a shared dinner', async () => {
@@ -146,6 +162,129 @@ describe('foldBalances', () => {
     expect(foldBalances(entries)).toEqual([
       { debtorDeviceId: mira.deviceId, creditorDeviceId: rohan.deviceId, amountPaise: 10_000 },
     ])
+  })
+
+  it('subtracts a Settlement from what the payer owes', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const entries = [
+      await makeExpenseEntry(rohan, { amountPaise: 90_000, participantDeviceIds: [mira.deviceId] }),
+      await pay(mira, { toDeviceId: rohan.deviceId, amountPaise: 90_000 }),
+    ]
+
+    expect(foldBalances(entries)).toEqual([])
+  })
+
+  it('counts a payer-written claim and a receiver-written Settlement alike, and immediately', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const expense = await makeExpenseEntry(rohan, {
+      amountPaise: 90_000,
+      participantDeviceIds: [mira.deviceId],
+    })
+    // Mira, the payer, claims she paid half; nothing is confirmed yet, but the
+    // Balance moves all the same (ADR-0007).
+    const claim = await pay(mira, { toDeviceId: rohan.deviceId, amountPaise: 45_000 })
+    // Rohan, the receiver, records the other half himself: already confirmed
+    // (ADR-0015), and the arithmetic is the same either way.
+    const received = await pay(rohan, {
+      fromDeviceId: mira.deviceId,
+      toDeviceId: rohan.deviceId,
+      amountPaise: 45_000,
+    })
+
+    expect(foldBalances([expense, claim])).toEqual([
+      { debtorDeviceId: mira.deviceId, creditorDeviceId: rohan.deviceId, amountPaise: 45_000 },
+    ])
+    expect(foldBalances([expense, received])).toEqual([
+      { debtorDeviceId: mira.deviceId, creditorDeviceId: rohan.deviceId, amountPaise: 45_000 },
+    ])
+    expect(foldBalances([expense, claim, received])).toEqual([])
+  })
+
+  it('flips the direction when a Settlement overpays', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const entries = [
+      await makeExpenseEntry(rohan, { amountPaise: 10_000, participantDeviceIds: [mira.deviceId] }),
+      await pay(mira, { toDeviceId: rohan.deviceId, amountPaise: 12_000 }),
+    ]
+
+    expect(foldBalances(entries)).toEqual([
+      { debtorDeviceId: rohan.deviceId, creditorDeviceId: mira.deviceId, amountPaise: 2000 },
+    ])
+  })
+
+  it('creates a reverse Balance for a Settlement against no Expense', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+
+    // Money moved from Mira to Rohan, so Rohan is the one who owes now.
+    expect(
+      foldBalances([await pay(mira, { toDeviceId: rohan.deviceId, amountPaise: 5000 })]),
+    ).toEqual([
+      { debtorDeviceId: rohan.deviceId, creditorDeviceId: mira.deviceId, amountPaise: 5000 },
+    ])
+  })
+
+  it('drops a Voided Settlement from the net', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const expense = await makeExpenseEntry(rohan, {
+      amountPaise: 90_000,
+      participantDeviceIds: [mira.deviceId],
+    })
+    const settlement = await pay(mira, { toDeviceId: rohan.deviceId, amountPaise: 90_000 })
+    const voidEntry = await createVoidEntry({
+      deviceId: rohan.deviceId,
+      signerPublicKey: rohan.signerPublicKey,
+      privateKey: rohan.keyPair.privateKey,
+      targetEntryId: settlement.id,
+      reason: 'never arrived',
+    })
+
+    expect(foldBalances([expense, settlement])).toEqual([])
+    expect(foldBalances([expense, settlement, voidEntry])).toEqual([
+      { debtorDeviceId: mira.deviceId, creditorDeviceId: rohan.deviceId, amountPaise: 90_000 },
+    ])
+  })
+
+  it('yields the same Balances whatever order Settlements arrive in', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const kabir = await makeDevice()
+    const entries = [
+      await makeExpenseEntry(rohan, {
+        amountPaise: 90_000,
+        participantDeviceIds: [rohan.deviceId, mira.deviceId, kabir.deviceId],
+      }),
+      await pay(mira, { toDeviceId: rohan.deviceId, amountPaise: 10_000 }),
+      await pay(kabir, { toDeviceId: rohan.deviceId, amountPaise: 5000 }),
+      await pay(rohan, {
+        fromDeviceId: mira.deviceId,
+        toDeviceId: rohan.deviceId,
+        amountPaise: 2000,
+      }),
+    ]
+    const expected = foldBalances(entries)
+
+    expect(foldBalances([...entries].reverse())).toEqual(expected)
+    expect(
+      foldBalances([entries[2], entries[0], entries[3], entries[1]] as typeof entries),
+    ).toEqual(expected)
+  })
+
+  it('ignores a Settlement payload this version cannot read', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const entries = [
+      await makeEntry('legacy settlement payload', {
+        type: 'settlement',
+        payload: { from: mira.deviceId, to: rohan.deviceId, rupees: 120 },
+      }),
+    ]
+
+    expect(foldBalances(entries)).toEqual([])
   })
 
   it('is empty for a book with no Expenses', () => {

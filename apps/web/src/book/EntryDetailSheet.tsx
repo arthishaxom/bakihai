@@ -7,13 +7,15 @@ import {
   type Member,
   parseQuantityToHundredths,
   readVoidPayload,
+  type SettlementState,
   VOID_ENTRY_TYPE,
   VOID_REASON_MAX_LENGTH,
 } from '@bakihai/shared'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
-import type { ReturnDraft, VoidDraft } from './session'
+import type { ReturnDraft, SettlementConfirmDraft, VoidDraft } from './session'
 import {
   describeEntry,
+  describeSettlementStatus,
   describeVoidedBy,
   type EntryNarrative,
   formatOccurredAt,
@@ -43,11 +45,17 @@ interface EntryDetailSheetProps {
   voidTargetNarrative?: EntryNarrative | undefined
   /** The Void that Voided this Entry, when it is Voided. */
   voidedBy?: EntryEnvelope | undefined
+  /** The Settlement this Entry is, when the fold still holds it. */
+  settlement?: SettlementState | undefined
+  /** This device's Member id, so only the receiver is offered a Confirm. */
+  viewerDeviceId: string
   members: Member[]
   /** Signs and writes a Return against `loan`; resolves once it is in the local book. */
   onReturn: (input: ReturnDraft) => Promise<void>
   /** Signs and writes a Void of `entry`; resolves once it is in the local book. */
   onVoid: (input: VoidDraft) => Promise<void>
+  /** Signs and writes a Confirm of `settlement`; resolves once it is in the local book. */
+  onConfirm: (input: SettlementConfirmDraft) => Promise<void>
   onClose: () => void
 }
 
@@ -72,9 +80,12 @@ export function EntryDetailSheet({
   voidTarget,
   voidTargetNarrative,
   voidedBy,
+  settlement,
+  viewerDeviceId,
   members,
   onReturn,
   onVoid,
+  onConfirm,
   onClose,
 }: EntryDetailSheetProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -84,6 +95,8 @@ export function EntryDetailSheet({
   const [quantity, setQuantity] = useState('')
   const [returnError, setReturnError] = useState<string | null>(null)
   const [returning, setReturning] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [confirmError, setConfirmError] = useState<string | null>(null)
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -98,6 +111,13 @@ export function EntryDetailSheet({
   // a Loan with nothing left outstanding all offer neither.
   const outstandingLoan = entry.type === LOAN_ENTRY_TYPE && !voidedBy ? loan : undefined
   const remainingHundredths = outstandingLoan?.remainingHundredths ?? 0
+  // Only the Settlement's receiver can attest to a claim, and only while the
+  // claim is unconfirmed and the Settlement not Voided (ADR-0015).
+  const canConfirm =
+    settlement !== undefined &&
+    !settlement.confirmed &&
+    settlement.toDeviceId === viewerDeviceId &&
+    !voidedBy
   // Optional properties cannot be handed over as undefined, so the narrative
   // is only given the parts this Entry actually has.
   const narrative: EntryNarrative = {
@@ -106,6 +126,7 @@ export function EntryDetailSheet({
     ...(loan === undefined ? {} : { loan }),
     ...(returned === undefined ? {} : { returned }),
     ...(loanEntry === undefined ? {} : { loanEntry }),
+    ...(settlement === undefined ? {} : { settlement }),
   }
 
   async function handleVoid(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -173,6 +194,23 @@ export function EntryDetailSheet({
     }
   }
 
+  async function handleConfirm(): Promise<void> {
+    if (!settlement) {
+      return
+    }
+
+    setConfirming(true)
+    setConfirmError(null)
+
+    try {
+      await onConfirm({ settlementEntryId: settlement.settlementEntryId })
+      onClose()
+    } catch (cause) {
+      setConfirmError(cause instanceof Error ? cause.message : 'Could not confirm the Settlement')
+      setConfirming(false)
+    }
+  }
+
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is the keyboard path for dismissing a modal dialog; the click only closes when the backdrop itself is tapped.
     <dialog
@@ -218,6 +256,35 @@ export function EntryDetailSheet({
           <p data-testid="voided-annotation" className="text-sm">
             {describeVoidedBy(voidedBy, members)}
           </p>
+        ) : null}
+
+        {settlement ? (
+          <p data-testid="settlement-status" className="text-sm">
+            {describeSettlementStatus(settlement, members)}
+          </p>
+        ) : null}
+
+        {canConfirm && settlement ? (
+          <div className="flex flex-col gap-3 border-foreground/10 border-t pt-4">
+            <p className="text-muted-foreground text-sm">
+              {nameFor(members, settlement.entry.authorDeviceId)} recorded this Settlement. Confirm
+              that it reached you.
+            </p>
+            {confirmError ? (
+              <p role="alert" className="text-red-600 text-sm">
+                {confirmError}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              data-testid="confirm-settlement"
+              onClick={handleConfirm}
+              disabled={confirming}
+              className={`${BUTTON_CLASSES} bg-foreground text-background disabled:opacity-50`}
+            >
+              {confirming ? 'Confirming…' : 'Confirm settlement'}
+            </button>
+          </div>
         ) : null}
 
         {entry.type === VOID_ENTRY_TYPE && readVoidPayload(entry) && !voidTarget ? (

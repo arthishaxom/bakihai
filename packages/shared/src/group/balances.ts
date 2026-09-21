@@ -1,6 +1,7 @@
 import { compareText } from '../compare'
 import type { EntryEnvelope } from '../entry-envelope'
 import { EXPENSE_ENTRY_TYPE, expenseEntryPayloadSchema, splitExpense } from './expenses'
+import { SETTLEMENT_ENTRY_TYPE, settlementEntryPayloadSchema } from './settlements'
 import { foldVoids } from './voids'
 
 /**
@@ -39,22 +40,40 @@ function addNet(
 }
 
 /**
- * Folds the book's Expense Entries into pairwise Balances (ADR-0004): every
- * participant owes the payer their equal share, and what a pair owes each
- * other across Entries is netted. The result is a pure function of the Entries
- * — the same book yields the same Balances in any order — and pairs that net
- * to zero are left out, so a pair that has squared up never appears. Entries
- * this version cannot read are ignored rather than misread. Voided Entries
- * drop out of the sum entirely, while both lines stay in the book (#12,
- * ADR-0005). Settlements will join this sum when they land (P2), so the fold
- * stays the whole book's arithmetic.
+ * Folds the book's Expense and Settlement Entries into pairwise Balances
+ * (ADR-0004): every participant owes the payer their equal share, every
+ * Settlement moves money from its payer to its receiver, and what a pair owes
+ * each other across Entries is netted. A Settlement counts from the moment it
+ * is appended, whether it is a payer's claim or the receiver's own record
+ * (ADR-0007, ADR-0015). The result is a pure function of the Entries — the same
+ * book yields the same Balances in any order — and pairs that net to zero are
+ * left out, so a pair that has squared up never appears. Entries this version
+ * cannot read are ignored rather than misread. Voided Entries drop out of the
+ * sum entirely, while both lines stay in the book (#12, ADR-0005).
  */
 export function foldBalances(entries: EntryEnvelope[]): Balance[] {
   const nets = new Map<string, PairNet>()
   const voidedByTarget = foldVoids(entries)
 
   for (const entry of entries) {
-    if (entry.type !== EXPENSE_ENTRY_TYPE || voidedByTarget.has(entry.id)) {
+    if (voidedByTarget.has(entry.id)) {
+      continue
+    }
+
+    if (entry.type === SETTLEMENT_ENTRY_TYPE) {
+      const payload = settlementEntryPayloadSchema.safeParse(entry.payload)
+
+      if (!payload.success) {
+        continue
+      }
+
+      // Money moved from the payer to the receiver, so the receiver's net
+      // position rises by the amount: the payer's debt to them falls.
+      addNet(nets, payload.data.toDeviceId, payload.data.fromDeviceId, payload.data.amountPaise)
+      continue
+    }
+
+    if (entry.type !== EXPENSE_ENTRY_TYPE) {
       continue
     }
 

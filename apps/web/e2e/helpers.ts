@@ -53,7 +53,9 @@ export function balanceTexts(page: Page): Promise<string[]> {
   return page
     .getByTestId('balance-list')
     .locator('li')
-    .evaluateAll((items) => items.map((item) => item.textContent?.trim() ?? ''))
+    .evaluateAll((items) =>
+      items.map((item) => item.querySelector('[data-balance-text]')?.textContent?.trim() ?? ''),
+    )
 }
 
 /** Opens the Add bottom sheet and returns it. */
@@ -72,6 +74,28 @@ export async function openLoanForm(page: Page): Promise<Locator> {
   const sheet = await openAddSheet(page)
 
   await sheet.getByRole('button', { name: 'Loan', exact: true }).click()
+
+  return sheet
+}
+
+/** Opens the Add bottom sheet on its Settlement form and returns the sheet. */
+export async function openSettlementForm(page: Page): Promise<Locator> {
+  const sheet = await openAddSheet(page)
+
+  await sheet.getByRole('button', { name: 'Settlement', exact: true }).click()
+
+  return sheet
+}
+
+/** Opens the Settle up bottom sheet from a Balance row and returns the sheet. */
+export async function openSettleUp(page: Page, row?: Locator): Promise<Locator> {
+  const balanceRow = row ?? page.getByTestId('balance-list').locator('li').first()
+
+  await balanceRow.getByTestId('settle-up').click()
+
+  const sheet = page.getByRole('dialog')
+
+  await expect(sheet).toBeVisible()
 
   return sheet
 }

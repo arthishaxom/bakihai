@@ -13,7 +13,13 @@ import {
   MEMBER_ENTRY_TYPE,
   type Member,
   RETURN_ENTRY_TYPE,
+  readSettlementConfirmPayload,
   readVoidPayload,
+  SETTLEMENT_CONFIRM_ENTRY_TYPE,
+  SETTLEMENT_ENTRY_TYPE,
+  type SettlementEntryPayload,
+  type SettlementState,
+  settlementEntryPayloadSchema,
   VOID_ENTRY_TYPE,
 } from '@bakihai/shared'
 
@@ -74,6 +80,21 @@ export function describeEntry(
     )
   }
 
+  if (entry.type === SETTLEMENT_CONFIRM_ENTRY_TYPE) {
+    return describeSettlementConfirm(
+      entry,
+      narrative.confirmTarget,
+      members,
+      narrative.confirmTargetNarrative,
+    )
+  }
+
+  const settlement = settlementEntryPayloadSchema.safeParse(entry.payload)
+
+  if (entry.type === SETTLEMENT_ENTRY_TYPE && settlement.success) {
+    return describeSettlement(settlement.data, members)
+  }
+
   const expense = expenseEntryPayloadSchema.safeParse(entry.payload)
 
   if (entry.type === EXPENSE_ENTRY_TYPE && expense.success) {
@@ -99,6 +120,15 @@ export interface EntryNarrative {
   loan?: LoanState
   /** The Return this Entry is, when it is a Return. */
   returned?: LoanReturn
+  /**
+   * The Settlement this Entry is, when the fold still holds it. A Voided
+   * Settlement is read from its own payload instead.
+   */
+  settlement?: SettlementState
+  /** The Settlement a Confirm names, when it is in this book. */
+  confirmTarget?: EntryEnvelope
+  /** What that Settlement itself reads as, so a Confirm names the Settlement. */
+  confirmTargetNarrative?: EntryNarrative
   /**
    * The Loan Entry itself, for lines the fold no longer holds: a Voided Loan
    * still names its item on its own struck-through line.
@@ -216,6 +246,76 @@ export function describeReturn(
   }
 
   return `${author} returned ${quantity} of ${loan.itemLabel} to ${nameFor(members, loan.lenderDeviceId)}`
+}
+
+/**
+ * What a Settlement reads as in the book: who paid whom, and the note if one
+ * was written. The line is neutral, like an Expense's; the viewer's own side is
+ * read in the form and the detail sheet instead.
+ */
+export function describeSettlement(payload: SettlementEntryPayload, members: Member[]): string {
+  const payer = nameFor(members, payload.fromDeviceId)
+  const receiver = nameFor(members, payload.toDeviceId)
+  const line = `${payer} paid ${receiver} ${formatRupees(payload.amountPaise)}`
+
+  return payload.note === undefined ? line : `${line} · ${payload.note}`
+}
+
+/**
+ * Who paid whom, read from the viewer's side: "You paid Mira ₹120", "Mira paid
+ * you ₹120", or the neutral line when the Settlement is between two others.
+ */
+export function describeSettlementLine(
+  fromDeviceId: string,
+  toDeviceId: string,
+  amountPaise: number,
+  members: NamedMember[],
+  viewerDeviceId: string,
+): string {
+  const amount = formatRupees(amountPaise)
+
+  if (fromDeviceId === viewerDeviceId) {
+    return `You paid ${nameFor(members, toDeviceId)} ${amount}`
+  }
+
+  if (toDeviceId === viewerDeviceId) {
+    return `${nameFor(members, fromDeviceId)} paid you ${amount}`
+  }
+
+  return `${nameFor(members, fromDeviceId)} paid ${nameFor(members, toDeviceId)} ${amount}`
+}
+
+/**
+ * Whether a Settlement has been attested to: a receiver-authored record is
+ * confirmed from the start, a payer's claim waits for the receiver (ADR-0015).
+ */
+export function describeSettlementStatus(settlement: SettlementState, members: Member[]): string {
+  const receiver = nameFor(members, settlement.toDeviceId)
+
+  return settlement.confirmed ? `Confirmed by ${receiver}` : `Waiting for ${receiver} to confirm`
+}
+
+/**
+ * What a Confirm reads as in the book: who attested to which Settlement. A
+ * Confirm naming a Settlement that is not in the book still names its author.
+ */
+export function describeSettlementConfirm(
+  confirmEntry: EntryEnvelope,
+  target: EntryEnvelope | undefined,
+  members: Member[],
+  targetNarrative: EntryNarrative = {},
+): string {
+  const confirmer = nameFor(members, confirmEntry.authorDeviceId)
+
+  if (!readSettlementConfirmPayload(confirmEntry)) {
+    return `${confirmer} confirmed a Settlement`
+  }
+
+  if (!target) {
+    return `${confirmer} confirmed a Settlement that is not in this book`
+  }
+
+  return `${confirmer} confirmed “${describeEntry(target, members, targetNarrative)}”`
 }
 
 /**

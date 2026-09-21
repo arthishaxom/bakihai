@@ -1,19 +1,23 @@
 import {
+  type Balance,
   buildInviteUrl,
   type EntryEnvelope,
   LOAN_ENTRY_TYPE,
   MEMBER_ENTRY_TYPE,
   RETURN_ENTRY_TYPE,
   readReturnPayload,
+  readSettlementConfirmPayload,
   readVoidPayload,
   type SyncStatus,
 } from '@bakihai/shared'
 import { useMemo, useState } from 'react'
 import { AddEntrySheet } from '../book/AddEntrySheet'
 import { EntryDetailSheet } from '../book/EntryDetailSheet'
+import { SettleUpSheet } from '../book/SettleUpSheet'
 import {
   describeBalance,
   describeEntry,
+  describeSettlementStatus,
   describeVoidedBy,
   type EntryNarrative,
   formatOccurredAt,
@@ -57,6 +61,8 @@ function BookScreen({ identity }: { identity: Identity }) {
     members,
     balances,
     loans,
+    settlements,
+    settlementsAwaitingConfirmation,
     voidsByTargetId,
     status,
     error,
@@ -65,11 +71,14 @@ function BookScreen({ identity }: { identity: Identity }) {
     writeLoan,
     writeReturn,
     writeVoid,
+    writeSettlement,
+    writeSettlementConfirm,
   } = useBook(identity)
   const inviteUrl = buildInviteUrl(window.location.origin, inviteForIdentity(identity))
   const [copied, setCopied] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
+  const [settlingBalance, setSettlingBalance] = useState<Balance | null>(null)
   // useBook hands over only accepted Entries, so the ledger just leaves out
   // the Member Entries that announce the roster itself and orders the rest
   // newest first.
@@ -92,9 +101,10 @@ function BookScreen({ identity }: { identity: Identity }) {
   )
   const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
   // What each row needs beyond its own Entry: the Loan a Loan or Return
-  // belongs to, and for a Void the target's own narrative, so a Void of a Loan
-  // names the item rather than the type. A Voided Loan is no longer in the
-  // fold, so its line is read from its own Entry instead.
+  // belongs to, and for a Void or Confirm the target's own narrative, so a Void
+  // of a Loan names the item and a Confirm names the Settlement it attests to
+  // rather than the type. A Voided Loan is no longer in the fold, so its line is
+  // read from its own Entry instead.
   const narratives = useMemo(() => {
     const byEntryId = new Map<string, EntryNarrative>()
     const liveLoans = new Map(loans.map((loan) => [loan.loanEntryId, loan]))
@@ -131,6 +141,27 @@ function BookScreen({ identity }: { identity: Identity }) {
       })
     }
 
+    for (const settlement of settlements) {
+      byEntryId.set(settlement.settlementEntryId, { settlement })
+    }
+
+    for (const entry of entries) {
+      const targetId = readSettlementConfirmPayload(entry)?.settlementEntryId
+
+      if (targetId === undefined) {
+        continue
+      }
+
+      const confirmTarget = entriesById.get(targetId)
+      const confirmTargetNarrative = byEntryId.get(targetId)
+
+      byEntryId.set(entry.id, {
+        ...(byEntryId.get(entry.id) ?? {}),
+        ...(confirmTarget === undefined ? {} : { confirmTarget }),
+        ...(confirmTargetNarrative === undefined ? {} : { confirmTargetNarrative }),
+      })
+    }
+
     for (const entry of entries) {
       const targetId = readVoidPayload(entry)?.targetEntryId
 
@@ -149,7 +180,7 @@ function BookScreen({ identity }: { identity: Identity }) {
     }
 
     return byEntryId
-  }, [entries, entriesById, loans])
+  }, [entries, entriesById, loans, settlements])
   const selectedEntry = selectedEntryId === null ? undefined : entriesById.get(selectedEntryId)
   const selectedNarrative =
     selectedEntry === undefined ? undefined : narratives.get(selectedEntry.id)
@@ -211,6 +242,13 @@ function BookScreen({ identity }: { identity: Identity }) {
         <h2 id="balances-heading" className="font-semibold text-lg">
           Balances
         </h2>
+        {settlementsAwaitingConfirmation.length > 0 ? (
+          <p data-testid="waiting-count" className="text-muted-foreground text-sm">
+            {settlementsAwaitingConfirmation.length === 1
+              ? '1 Settlement waiting for confirmation'
+              : `${settlementsAwaitingConfirmation.length} Settlements waiting for confirmation`}
+          </p>
+        ) : null}
         {visibleBalances.length > 0 ? (
           <ul data-testid="balance-list" className="flex flex-col gap-1">
             {visibleBalances.map((balance) => (
@@ -218,8 +256,19 @@ function BookScreen({ identity }: { identity: Identity }) {
                 key={`${balance.debtorDeviceId}/${balance.creditorDeviceId}`}
                 data-balance-debtor={balance.debtorDeviceId}
                 data-balance-creditor={balance.creditorDeviceId}
+                className="flex min-h-11 items-center justify-between gap-2"
               >
-                {describeBalance(balance, members, identity.deviceId)}
+                <span data-balance-text>
+                  {describeBalance(balance, members, identity.deviceId)}
+                </span>
+                <button
+                  type="button"
+                  data-testid="settle-up"
+                  onClick={() => setSettlingBalance(balance)}
+                  className="min-h-11 shrink-0 rounded-md border border-foreground/20 px-3 py-2 text-sm"
+                >
+                  Settle up
+                </button>
               </li>
             ))}
           </ul>
@@ -238,6 +287,7 @@ function BookScreen({ identity }: { identity: Identity }) {
           <ul data-testid="entry-list" className="flex flex-col gap-1">
             {ledgerEntries.map((entry) => {
               const voidEntry = voidsByTargetId.get(entry.id)
+              const settlement = narratives.get(entry.id)?.settlement
 
               return (
                 <li
@@ -257,6 +307,11 @@ function BookScreen({ identity }: { identity: Identity }) {
                     {voidEntry ? (
                       <span className="text-muted-foreground text-sm">
                         {describeVoidedBy(voidEntry, members)}
+                      </span>
+                    ) : null}
+                    {settlement && !settlement.confirmed ? (
+                      <span className="text-muted-foreground text-sm">
+                        {describeSettlementStatus(settlement, members)}
                       </span>
                     ) : null}
                     <span className="text-muted-foreground text-sm">
@@ -313,7 +368,18 @@ function BookScreen({ identity }: { identity: Identity }) {
           viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
           onExpense={writeExpense}
           onLoan={writeLoan}
+          onSettlement={writeSettlement}
           onClose={() => setAddOpen(false)}
+        />
+      ) : null}
+
+      {settlingBalance ? (
+        <SettleUpSheet
+          balance={settlingBalance}
+          members={members}
+          viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
+          onSettle={writeSettlement}
+          onClose={() => setSettlingBalance(null)}
         />
       ) : null}
 
@@ -326,9 +392,12 @@ function BookScreen({ identity }: { identity: Identity }) {
           voidTarget={selectedNarrative?.voidTarget}
           voidTargetNarrative={selectedNarrative?.voidTargetNarrative}
           voidedBy={selectedVoid}
+          settlement={selectedNarrative?.settlement}
+          viewerDeviceId={identity.deviceId}
           members={members}
           onReturn={writeReturn}
           onVoid={writeVoid}
+          onConfirm={writeSettlementConfirm}
           onClose={() => setSelectedEntryId(null)}
         />
       ) : null}

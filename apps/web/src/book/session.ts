@@ -5,6 +5,8 @@ import {
   createLoanEntry,
   createMemberEntry,
   createReturnEntry,
+  createSettlementConfirmEntry,
+  createSettlementEntry,
   createVoidEntry,
   fromBase64Url,
   MEMBER_ENTRY_TYPE,
@@ -46,6 +48,20 @@ export interface VoidDraft {
   reason?: string
 }
 
+/** The fields a Settlement form decides; the session signs and writes the Settlement. */
+export interface SettlementDraft {
+  fromDeviceId: string
+  toDeviceId: string
+  amountPaise: number
+  /** Optional free-text note, like "for dinner". */
+  note?: string
+}
+
+/** The fields a Settlement detail sheet decides when confirming; the session signs and writes it. */
+export interface SettlementConfirmDraft {
+  settlementEntryId: string
+}
+
 /** One Group's live book: the document, its local copy, and its relay connection. */
 export interface BookSession {
   doc: Y.Doc
@@ -61,6 +77,10 @@ export interface BookSession {
   writeReturn(input: ReturnDraft): Promise<void>
   /** Signs and writes a Void to the local book; it syncs like any other Entry. */
   writeVoid(input: VoidDraft): Promise<void>
+  /** Signs and writes a Settlement to the local book; it syncs like any other Entry. */
+  writeSettlement(input: SettlementDraft): Promise<void>
+  /** Signs and writes a Confirm of a Settlement to the local book. */
+  writeSettlementConfirm(input: SettlementConfirmDraft): Promise<void>
 }
 
 let current: { groupId: string; session: BookSession } | null = null
@@ -147,6 +167,31 @@ function createBookSession(identity: Identity): BookSession {
         privateKey,
         targetEntryId: input.targetEntryId,
         ...(input.reason === undefined ? {} : { reason: input.reason }),
+      })
+
+      putEntry(doc, entry)
+    },
+    async writeSettlement(input) {
+      const privateKey = await deviceKey()
+      const entry = await createSettlementEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        fromDeviceId: input.fromDeviceId,
+        toDeviceId: input.toDeviceId,
+        amountPaise: input.amountPaise,
+        ...(input.note === undefined ? {} : { note: input.note }),
+      })
+
+      putEntry(doc, entry)
+    },
+    async writeSettlementConfirm(input) {
+      const privateKey = await deviceKey()
+      const entry = await createSettlementConfirmEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        settlementEntryId: input.settlementEntryId,
       })
 
       putEntry(doc, entry)

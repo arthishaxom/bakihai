@@ -98,6 +98,24 @@ export {
   memberEntryPayloadSchema,
 } from './group/members'
 export {
+  type CreateSettlementConfirmEntryInput,
+  type CreateSettlementEntryInput,
+  createSettlementConfirmEntry,
+  createSettlementEntry,
+  foldSettlements,
+  foldSettlementsAwaitingConfirmation,
+  readSettlementConfirmPayload,
+  readSettlementPayload,
+  SETTLEMENT_CONFIRM_ENTRY_TYPE,
+  SETTLEMENT_ENTRY_TYPE,
+  SETTLEMENT_NOTE_MAX_LENGTH,
+  type SettlementConfirmEntryPayload,
+  type SettlementEntryPayload,
+  type SettlementState,
+  settlementConfirmEntryPayloadSchema,
+  settlementEntryPayloadSchema,
+} from './group/settlements'
+export {
   type CreateVoidEntryInput,
   canVoidEntry,
   createVoidEntry,

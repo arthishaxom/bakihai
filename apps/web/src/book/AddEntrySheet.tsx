@@ -1,29 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
 import { AddExpenseForm } from './AddExpenseForm'
 import { AddLoanForm } from './AddLoanForm'
-import type { ExpenseDraft, LoanDraft } from './session'
+import { AddSettlementForm } from './AddSettlementForm'
+import type { ExpenseDraft, LoanDraft, SettlementDraft } from './session'
 import type { NamedMember } from './summaries'
 
-type AddMode = 'expense' | 'loan'
+type AddMode = 'expense' | 'loan' | 'settlement'
 
 /**
- * The Add bottom sheet: an Expense / Loan mode switch over the form for the
- * chosen kind. It is a native `<dialog>` shown modally, so the browser gives
- * it the top layer, a focus trap, and Escape to dismiss for free, and CSS pins
- * it to the bottom of the viewport for one-handed use. A successful write
- * closes the sheet; a refusal leaves it open with the reason on screen.
+ * The Add bottom sheet: an Expense / Loan / Settlement mode switch over the
+ * form for the chosen kind. It is a native `<dialog>` shown modally, so the
+ * browser gives it the top layer, a focus trap, and Escape to dismiss for free,
+ * and CSS pins it to the bottom of the viewport for one-handed use. A
+ * successful write closes the sheet; a refusal leaves it open with the reason
+ * on screen.
  */
 export function AddEntrySheet({
   members,
   viewer,
   onExpense,
   onLoan,
+  onSettlement,
   onClose,
 }: {
   members: NamedMember[]
   viewer: NamedMember
   onExpense: (input: ExpenseDraft) => Promise<void>
   onLoan: (input: LoanDraft) => Promise<void>
+  onSettlement: (input: SettlementDraft) => Promise<void>
   onClose: () => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -44,6 +48,11 @@ export function AddEntrySheet({
 
   async function handleLoan(input: LoanDraft): Promise<void> {
     await onLoan(input)
+    onClose()
+  }
+
+  async function handleSettlement(input: SettlementDraft): Promise<void> {
+    await onSettlement(input)
     onClose()
   }
 
@@ -95,12 +104,22 @@ export function AddEntrySheet({
           >
             Loan
           </button>
+          <button
+            type="button"
+            aria-pressed={mode === 'settlement'}
+            onClick={() => setMode('settlement')}
+            className={modeButtonClasses(mode === 'settlement')}
+          >
+            Settlement
+          </button>
         </fieldset>
 
         {mode === 'expense' ? (
           <AddExpenseForm members={members} viewer={viewer} onSubmit={handleExpense} />
-        ) : (
+        ) : mode === 'loan' ? (
           <AddLoanForm members={members} viewer={viewer} onSubmit={handleLoan} />
+        ) : (
+          <AddSettlementForm members={members} viewer={viewer} onSubmit={handleSettlement} />
         )}
       </div>
     </dialog>
