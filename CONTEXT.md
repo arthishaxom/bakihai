@@ -32,6 +32,14 @@ _Avoid_: repayment, give-back
 An Entry recording a real-world payment from one member to another, optionally attached to the Expense or Loan it settles.
 _Avoid_: payment, transfer, transaction
 
+**Confirm**:
+An Entry where a Settlement's receiver attests to a payment they did not record themselves.
+_Avoid_: approve, accept
+
+**Payment address**:
+A member's UPI ID and payee name, claimed by their own device, used to pay them.
+_Avoid_: bank details, account
+
 **Balance**:
 The net position between two members, computed from all Entries. Never stored.
 _Avoid_: dues, debt, outstanding
@@ -46,4 +54,4 @@ _Avoid_: delete, remove, cancel
 
 **Archived**:
 Hidden from the active view but still in the book.
-_Avoid_: deleted, cleared
+_Avoid_: deleted, cleared, removed
