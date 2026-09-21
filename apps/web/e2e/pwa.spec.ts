@@ -18,6 +18,29 @@ async function waitForServiceWorker(page: Page): Promise<void> {
     .toBe(true)
 }
 
+/**
+ * Asserts the page's last navigation was served by its service worker.
+ *
+ * Chromium does not always report the main-resource Response for a navigation
+ * a worker fulfilled from its precache, so under load `reload()` can resolve
+ * with a null response; the page's own navigation timing is the reliable
+ * signal, because a worker-controlled navigation reports a non-zero
+ * `workerStart`.
+ */
+async function expectServedByServiceWorker(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const navigation = performance.getEntriesByType('navigation')[0]
+
+          return navigation instanceof PerformanceNavigationTiming ? navigation.workerStart : 0
+        }),
+      { timeout: 15_000 },
+    )
+    .toBeGreaterThan(0)
+}
+
 /** Creates a Group on one device, joins it from a second, and writes one ₹900 dinner. */
 async function bookWithADinner(browser: Browser): Promise<{
   rohanContext: BrowserContext
@@ -121,9 +144,8 @@ test('the installed app opens offline and shows the book', async ({ browser }) =
   await rohanContext.setOffline(true)
   await expect.poll(() => rohan.evaluate(() => navigator.onLine)).toBe(false)
 
-  const response = await rohan.reload()
-
-  expect(response?.fromServiceWorker()).toBe(true)
+  await rohan.reload()
+  await expectServedByServiceWorker(rohan)
   await expectBookVisible(rohan)
 
   await rohanContext.setOffline(false)
@@ -154,9 +176,8 @@ test('a deployed update replaces the shell and keeps the local book', async ({ b
 
   // The new shell serves a cold, offline start and reads the same book.
   await rohanContext.setOffline(true)
-  const response = await rohan.reload()
-
-  expect(response?.fromServiceWorker()).toBe(true)
+  await rohan.reload()
+  await expectServedByServiceWorker(rohan)
   await expectBookVisible(rohan)
 
   await rohanContext.setOffline(false)
