@@ -48,6 +48,10 @@ _Avoid_: dues, debt, outstanding
 An Expense or Loan whose cost is fully covered; a state computed from Entries, never stored.
 _Avoid_: closed, completed, done
 
+**Over-returned**:
+A Loan whose Returns together exceed its quantity; the fold clamps the remainder at zero and marks how far past it went.
+_Avoid_: negative remaining, excess return
+
 **Void**:
 An Entry that cancels an earlier Entry while both remain in the book.
 _Avoid_: delete, remove, cancel

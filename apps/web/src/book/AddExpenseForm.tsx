@@ -1,20 +1,16 @@
 import { type ExpenseShare, parseRupeesToPaise, splitExpense } from '@bakihai/shared'
 import { type FormEvent, useState } from 'react'
 import type { ExpenseDraft } from './session'
-import { describeShares, formatRupees } from './summaries'
+import { describeShares, formatRupees, type NamedMember } from './summaries'
 
-const INPUT_CLASSES = 'rounded-md border border-foreground/20 bg-transparent px-3 py-2 text-base'
+const INPUT_CLASSES =
+  'min-h-11 rounded-md border border-foreground/20 bg-transparent px-3 py-2 text-base'
 
 // The pill is a label around a real checkbox: the checkbox keeps its keyboard
 // and screen-reader semantics, stretched invisibly over the pill so the whole
 // shape is the hit target, and :checked / :focus-visible style the label.
 const PILL_CLASSES =
-  'relative inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-foreground/20 px-3 py-1.5 text-sm transition-colors has-[:checked]:border-foreground has-[:checked]:bg-foreground has-[:checked]:text-background has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-foreground'
-
-interface RosterEntry {
-  deviceId: string
-  displayName: string
-}
+  'relative inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border border-foreground/20 px-3 py-1.5 text-sm transition-colors has-[:checked]:border-foreground has-[:checked]:bg-foreground has-[:checked]:text-background has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-foreground'
 
 /**
  * The Add Expense form: amount in rupees (stored in paise, ADR-0008), a payer,
@@ -28,8 +24,8 @@ export function AddExpenseForm({
   viewer,
   onSubmit,
 }: {
-  members: RosterEntry[]
-  viewer: RosterEntry
+  members: NamedMember[]
+  viewer: NamedMember
   onSubmit: (input: ExpenseDraft) => Promise<void>
 }) {
   const [amount, setAmount] = useState('')
@@ -43,7 +39,7 @@ export function AddExpenseForm({
   // On a fresh join the fold can lag this device's own Member Entry by a
   // moment, so the writer stays on the roster either way rather than the
   // Expense quietly landing on someone else's name.
-  const roster: RosterEntry[] = members.some((member) => member.deviceId === viewer.deviceId)
+  const roster: NamedMember[] = members.some((member) => member.deviceId === viewer.deviceId)
     ? members
     : [viewer, ...members]
   const participants = roster.filter((member) => !excludedIds.has(member.deviceId))
@@ -206,7 +202,7 @@ export function AddExpenseForm({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="rounded-md bg-foreground px-4 py-2 font-medium text-background disabled:opacity-50"
+          className="min-h-11 rounded-md bg-foreground px-4 py-2 font-medium text-background disabled:opacity-50"
         >
           {submitting ? 'Adding…' : 'Add expense'}
         </button>

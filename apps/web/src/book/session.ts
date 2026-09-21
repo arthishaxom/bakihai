@@ -2,7 +2,9 @@ import {
   BookSyncProvider,
   createBookDoc,
   createExpenseEntry,
+  createLoanEntry,
   createMemberEntry,
+  createReturnEntry,
   createVoidEntry,
   fromBase64Url,
   MEMBER_ENTRY_TYPE,
@@ -22,6 +24,22 @@ export interface ExpenseDraft {
   participantDeviceIds: string[]
 }
 
+/** The fields an Add Loan form decides; the session signs and writes the Entry. */
+export interface LoanDraft {
+  itemLabel: string
+  quantityHundredths: number
+  /** Optional free-text unit, like "kg" or "dozen". */
+  unit?: string
+  lenderDeviceId: string
+  borrowerDeviceId: string
+}
+
+/** The fields a Return form decides; the session signs and writes the Entry. */
+export interface ReturnDraft {
+  loanEntryId: string
+  quantityHundredths: number
+}
+
 /** The fields a detail sheet decides when correcting an Entry; the session signs and writes it. */
 export interface VoidDraft {
   targetEntryId: string
@@ -37,6 +55,10 @@ export interface BookSession {
   ready: Promise<void>
   /** Signs and writes an Expense to the local book; it syncs like any other Entry. */
   writeExpense(input: ExpenseDraft): Promise<void>
+  /** Signs and writes a Loan to the local book; it syncs like any other Entry. */
+  writeLoan(input: LoanDraft): Promise<void>
+  /** Signs and writes a Return to the local book; it syncs like any other Entry. */
+  writeReturn(input: ReturnDraft): Promise<void>
   /** Signs and writes a Void to the local book; it syncs like any other Entry. */
   writeVoid(input: VoidDraft): Promise<void>
 }
@@ -86,6 +108,33 @@ function createBookSession(identity: Identity): BookSession {
         signerPublicKey: identity.signerPublicKey,
         privateKey,
         ...input,
+      })
+
+      putEntry(doc, entry)
+    },
+    async writeLoan(input) {
+      const privateKey = await deviceKey()
+      const entry = await createLoanEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        itemLabel: input.itemLabel,
+        quantityHundredths: input.quantityHundredths,
+        ...(input.unit === undefined ? {} : { unit: input.unit }),
+        lenderDeviceId: input.lenderDeviceId,
+        borrowerDeviceId: input.borrowerDeviceId,
+      })
+
+      putEntry(doc, entry)
+    },
+    async writeReturn(input) {
+      const privateKey = await deviceKey()
+      const entry = await createReturnEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        loanEntryId: input.loanEntryId,
+        quantityHundredths: input.quantityHundredths,
       })
 
       putEntry(doc, entry)

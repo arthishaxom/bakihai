@@ -139,7 +139,7 @@ describe('foldBalances', () => {
         type: 'expense',
         payload: { note: 'dinner', amountPaise: 90_000 },
       }),
-      await makeEntry('not an expense at all', { type: 'loan', payload: { amountPaise: 100 } }),
+      await makeEntry('not an expense at all', { type: 'mystery', payload: { amountPaise: 100 } }),
       await makeExpenseEntry(rohan, { amountPaise: 10_000, participantDeviceIds: [mira.deviceId] }),
     ]
 

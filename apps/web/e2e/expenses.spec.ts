@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test'
-import { balanceTexts, createGroup, joinGroup, memberNames } from './helpers'
+import { balanceTexts, createGroup, joinGroup, memberNames, openAddSheet } from './helpers'
 
 /** One Member's pill in the Add Expense form, addressed by display name. */
 function pill(page: Page, name: string) {
@@ -18,8 +18,8 @@ function sharePaise(page: Page): Promise<number[]> {
 }
 
 /**
- * Adds an Expense from the form: the payer is whoever is using the device, and
- * everyone shares unless a name is passed in `excluding` (the payer is then
+ * Adds an Expense from the Add sheet: the payer is whoever is using the device,
+ * and everyone shares unless a name is passed in `excluding` (the payer is then
  * fronting the cost for them).
  */
 async function addExpense(
@@ -28,14 +28,15 @@ async function addExpense(
 ): Promise<void> {
   const entries = page.getByTestId('entry-list').locator('li')
   const before = await entries.count()
+  const sheet = await openAddSheet(page)
 
-  await page.getByLabel('Amount (₹)').fill(amount)
+  await sheet.getByLabel('Amount (₹)').fill(amount)
 
   for (const name of excluding) {
-    await page.getByRole('checkbox', { name }).uncheck()
+    await sheet.getByRole('checkbox', { name }).uncheck()
   }
 
-  await page.getByRole('button', { name: 'Add expense' }).click()
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(entries).toHaveCount(before + 1)
 }
 
@@ -91,6 +92,8 @@ test('the form previews each exact share and redistributes when a Member is unse
 
   await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira', 'Kabir'])
 
+  await openAddSheet(rohan)
+
   // A pill is a real checkbox: Space toggles it from the keyboard.
   await rohan.getByRole('checkbox', { name: 'Mira' }).focus()
   await rohan.keyboard.press('Space')
@@ -134,11 +137,14 @@ test('paying for others without sharing the cost charges each of them their shar
   await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira'])
 
   // Rohan fronts Mira's cost: he pays, but only Mira shares it.
-  await rohan.getByLabel('Amount (₹)').fill('300')
-  await rohan.getByRole('checkbox', { name: 'Rohan' }).uncheck()
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('300')
+  await sheet.getByRole('checkbox', { name: 'Rohan' }).uncheck()
   await expect(rohan.getByTestId('split-summary')).toHaveText('Rohan paid ₹300 · Mira owes ₹300')
 
-  await addExpense(rohan, { amount: '300', excluding: ['Rohan'] })
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
+  await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(1)
 
   await expect.poll(() => balanceTexts(rohan)).toEqual(['Mira owes You ₹300'])
   await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohan ₹300'])
@@ -162,8 +168,10 @@ test('excluding the payer names what each of the others owes', async ({ browser 
 
   await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira', 'Kabir'])
 
-  await rohan.getByLabel('Amount (₹)').fill('900')
-  await rohan.getByRole('checkbox', { name: 'Rohan' }).uncheck()
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('900')
+  await sheet.getByRole('checkbox', { name: 'Rohan' }).uncheck()
 
   await expect(rohan.getByTestId('split-summary')).toHaveText(
     'Rohan paid ₹900 · Mira and Kabir each owe ₹450',
@@ -172,7 +180,7 @@ test('excluding the payer names what each of the others owes', async ({ browser 
   await expect(pill(rohan, 'Mira')).toHaveAttribute('data-share-paise', '45000')
   await expect(pill(rohan, 'Kabir')).toHaveAttribute('data-share-paise', '45000')
 
-  await rohan.getByRole('button', { name: 'Add expense' }).click()
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(1)
   // The payer is fronting a cost the others owe, so the word is gone from every screen.
   await expect(rohan.locator('body')).not.toContainText(/treat/i)
@@ -196,6 +204,8 @@ test('a split only the payer shares cannot be submitted and the form says why', 
   const mira = await miraContext.newPage()
   await joinGroup(mira, invite, 'Mira')
   await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira'])
+
+  await openAddSheet(rohan)
 
   await rohan.getByLabel('Amount (₹)').fill('300')
   await expect(rohan.getByTestId('split-summary')).toHaveText('Rohan paid ₹300 · ₹150 each')
@@ -285,8 +295,10 @@ test('an amount that is not rupees is refused with an explanation', async ({ bro
   await joinGroup(mira, invite, 'Mira')
   await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira'])
 
-  await rohan.getByLabel('Amount (₹)').fill('12.345')
-  await rohan.getByRole('button', { name: 'Add expense' }).click()
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('12.345')
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
 
   await expect(rohan.getByRole('alert')).toContainText('Enter an amount in rupees')
   await expect(rohan.getByTestId('entry-list')).toHaveCount(0)

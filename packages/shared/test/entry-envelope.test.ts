@@ -59,7 +59,7 @@ describe('EntryEnvelope schema', () => {
   })
 
   it('accepts an Entry type this app version does not know', async () => {
-    const { entry } = await makeSignedEntry({ type: 'loan', payload: { item: 'eggs', taken: 3 } })
+    const { entry } = await makeSignedEntry({ type: 'mystery', payload: { widget: 'unknown' } })
 
     expect(entryEnvelopeSchema.safeParse(entry).success).toBe(true)
     await expect(verifyEntryEnvelope(entry)).resolves.toEqual(entry)

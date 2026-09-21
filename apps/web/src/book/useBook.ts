@@ -5,8 +5,10 @@ import {
   type EntryEnvelope,
   entriesMap,
   foldBalances,
+  foldLoans,
   foldMembers,
   foldVoids,
+  type LoanState,
   type Member,
   readEntries,
   type SyncStatus,
@@ -14,7 +16,13 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import type * as Y from 'yjs'
 import type { Identity } from '../identity/identity'
-import { type ExpenseDraft, getBookSession, type VoidDraft } from './session'
+import {
+  type ExpenseDraft,
+  getBookSession,
+  type LoanDraft,
+  type ReturnDraft,
+  type VoidDraft,
+} from './session'
 import { useVerifiedEntries } from './useVerifiedEntries'
 
 export interface BookView {
@@ -27,6 +35,8 @@ export interface BookView {
   members: Member[]
   /** Pairwise Balances folded from the book's Expense Entries, zeroes already gone. */
   balances: Balance[]
+  /** Item states folded from the book's Loan and Return Entries, in Entry id order. */
+  loans: LoanState[]
   /**
    * The Void Entries that Void something, keyed by the Voided Entry's id. A
    * Void naming a Member Entry or another Void is not here, so this map is
@@ -43,6 +53,10 @@ export interface BookView {
   ready: boolean
   /** Signs and writes an Expense to the local book. */
   writeExpense(input: ExpenseDraft): Promise<void>
+  /** Signs and writes a Loan to the local book. */
+  writeLoan(input: LoanDraft): Promise<void>
+  /** Signs and writes a Return to the local book. */
+  writeReturn(input: ReturnDraft): Promise<void>
   /** Signs and writes a Void to the local book. */
   writeVoid(input: VoidDraft): Promise<void>
 }
@@ -83,17 +97,21 @@ export function useBook(identity: Identity): BookView {
   const entries = useMemo(() => admitEntries(verified.entries), [verified.entries])
   const members = useMemo(() => foldMembers(entries), [entries])
   const balances = useMemo(() => foldBalances(entries), [entries])
+  const loans = useMemo(() => foldLoans(entries), [entries])
   const voidsByTargetId = useMemo(() => foldVoids(entries), [entries])
 
   return {
     entries,
     members,
     balances,
+    loans,
     voidsByTargetId,
     status,
     error,
     ready: sessionReady && verified.settled,
     writeExpense: session.writeExpense,
+    writeLoan: session.writeLoan,
+    writeReturn: session.writeReturn,
     writeVoid: session.writeVoid,
   }
 }

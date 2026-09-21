@@ -1,5 +1,13 @@
-import { type BrowserContextOptions, expect, type Locator, type Page, test } from '@playwright/test'
-import { balanceTexts, createGroup, joinGroup, memberNames } from './helpers'
+import { type BrowserContextOptions, expect, type Page, test } from '@playwright/test'
+import {
+  balanceTexts,
+  createGroup,
+  entryRow,
+  joinGroup,
+  memberNames,
+  openAddSheet,
+  openEntrySheet,
+} from './helpers'
 
 // Every test runs at a phone viewport: the detail sheet is a mobile surface.
 const PHONE_HEIGHT = 844
@@ -11,30 +19,15 @@ const PHONE: BrowserContextOptions = {
 
 test.use(PHONE)
 
-/** Adds an Expense from the form and waits for its line to appear. */
+/** Adds an Expense from the Add sheet and waits for its line to appear. */
 async function addExpense(page: Page, amount: string): Promise<void> {
   const entries = page.getByTestId('entry-list').locator('li')
   const before = await entries.count()
+  const sheet = await openAddSheet(page)
 
-  await page.getByLabel('Amount (₹)').fill(amount)
-  await page.getByRole('button', { name: 'Add expense' }).click()
+  await sheet.getByLabel('Amount (₹)').fill(amount)
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(entries).toHaveCount(before + 1)
-}
-
-/** The ledger row of a given Entry type. */
-function entryRow(page: Page, type: string): Locator {
-  return page.getByTestId('entry-list').locator(`li[data-entry-type="${type}"]`)
-}
-
-/** Opens a row's detail bottom sheet. */
-async function openEntrySheet(page: Page, row: Locator): Promise<Locator> {
-  await row.getByRole('button').click()
-
-  const sheet = page.getByRole('dialog')
-
-  await expect(sheet).toBeVisible()
-
-  return sheet
 }
 
 test('an Expense is Voided from its bottom sheet and the Balance clears on both devices', async ({

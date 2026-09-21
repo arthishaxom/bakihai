@@ -6,6 +6,7 @@ import {
   invitePayload,
   joinGroup,
   memberNames,
+  openAddSheet,
 } from './helpers'
 
 const HARNESS_PATH = '/e2e/harness/harness.html'
@@ -71,8 +72,10 @@ test('a modified client cannot slip a forged, tampered, or malformed Entry into 
   await joinGroup(mira, invite, 'Mira')
   await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira'])
 
-  await rohan.getByLabel('Amount (₹)').fill('900')
-  await rohan.getByRole('button', { name: 'Add expense' }).click()
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('900')
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(1)
   await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohan ₹450'])
 
@@ -164,9 +167,11 @@ test('a modified client cannot slip a forged, tampered, or malformed Entry into 
   await expect.poll(() => balanceTexts(rohan)).toEqual(['Mira owes You ₹450'])
 
   // The honest phone keeps working: a new Expense still writes and folds.
-  await mira.getByLabel('Amount (₹)').fill('100')
-  await mira.getByRole('checkbox', { name: 'Seed' }).uncheck()
-  await mira.getByRole('button', { name: 'Add expense' }).click()
+  const miraSheet = await openAddSheet(mira)
+
+  await miraSheet.getByLabel('Amount (₹)').fill('100')
+  await miraSheet.getByRole('checkbox', { name: 'Seed' }).uncheck()
+  await miraSheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(mira.getByTestId('entry-list').locator('li')).toHaveCount(2)
   await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohan ₹400'])
 
@@ -188,8 +193,10 @@ test('a payload rewritten under a known id and signature never hits the verifica
 
   // An honest ₹900 dinner first verifies and folds on Mira's phone, so her
   // page has checked exactly this id and signature once already.
-  await rohan.getByLabel('Amount (₹)').fill('900')
-  await rohan.getByRole('button', { name: 'Add expense' }).click()
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('900')
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohan ₹450'])
 
   const harness = await openHarness(rohanContext, invitePayload(invite))
@@ -239,8 +246,10 @@ test('a payload rewritten under a known id and signature never hits the verifica
   await expect(mira.getByRole('alert')).toHaveCount(0)
 
   // The honest phone keeps working: a new Expense still writes.
-  await mira.getByLabel('Amount (₹)').fill('100')
-  await mira.getByRole('button', { name: 'Add expense' }).click()
+  const miraSheet = await openAddSheet(mira)
+
+  await miraSheet.getByLabel('Amount (₹)').fill('100')
+  await miraSheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(mira.getByTestId('entry-list').locator('li')).toHaveCount(1)
   await expect(mira.locator('body')).not.toContainText('₹4999.50')
 
@@ -266,8 +275,11 @@ test('the device signing key lives in IndexedDB, not in local storage', async ({
   // A reload restores the key from IndexedDB: signing still works.
   await rohan.reload()
   await expect(rohan.getByTestId('member-list')).toContainText('Rohan')
-  await rohan.getByLabel('Amount (₹)').fill('100')
-  await rohan.getByRole('button', { name: 'Add expense' }).click()
+
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('100')
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(1)
 
   const miraIdentity = await storedIdentity(mira)
@@ -320,8 +332,10 @@ test('a legacy PKCS8 key moves into IndexedDB on first use', async ({ page }) =>
   expect(await deviceKeyInIndexedDb(page, legacy.deviceId)).toBe(true)
 
   // The migrated key signs as before.
-  await page.getByLabel('Amount (₹)').fill('100')
-  await page.getByRole('checkbox', { name: 'Legacy' }).uncheck()
-  await page.getByRole('button', { name: 'Add expense' }).click()
+  const sheet = await openAddSheet(page)
+
+  await sheet.getByLabel('Amount (₹)').fill('100')
+  await sheet.getByRole('checkbox', { name: 'Legacy' }).uncheck()
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(page.getByTestId('entry-list').locator('li')).toHaveCount(1)
 })

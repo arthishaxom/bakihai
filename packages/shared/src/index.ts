@@ -68,6 +68,25 @@ export {
   readInviteFromHash,
 } from './group/invite'
 export {
+  type CreateLoanEntryInput,
+  type CreateReturnEntryInput,
+  createLoanEntry,
+  createReturnEntry,
+  foldLoans,
+  LOAN_ENTRY_TYPE,
+  LOAN_ITEM_LABEL_MAX_LENGTH,
+  LOAN_UNIT_MAX_LENGTH,
+  type LoanEntryPayload,
+  type LoanReturn,
+  type LoanState,
+  loanEntryPayloadSchema,
+  RETURN_ENTRY_TYPE,
+  type ReturnEntryPayload,
+  readLoanPayload,
+  readReturnPayload,
+  returnEntryPayloadSchema,
+} from './group/loans'
+export {
   type CreateMemberEntryInput,
   createMemberEntry,
   foldMemberKeys,
@@ -90,6 +109,7 @@ export {
   voidEntryPayloadSchema,
 } from './group/voids'
 export { formatPaiseAsRupees, parseRupeesToPaise } from './money'
+export { formatHundredthsAsQuantity, parseQuantityToHundredths } from './quantity'
 export {
   frameForSealedUpdate,
   HEARTBEAT_FRAME,

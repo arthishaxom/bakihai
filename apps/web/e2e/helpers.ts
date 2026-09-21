@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 /** The decoded contents of an invite link's `#invite=` fragment. */
 export interface InvitePayload {
@@ -54,4 +54,40 @@ export function balanceTexts(page: Page): Promise<string[]> {
     .getByTestId('balance-list')
     .locator('li')
     .evaluateAll((items) => items.map((item) => item.textContent?.trim() ?? ''))
+}
+
+/** Opens the Add bottom sheet and returns it. */
+export async function openAddSheet(page: Page): Promise<Locator> {
+  await page.getByTestId('add-entry').click()
+
+  const sheet = page.getByRole('dialog')
+
+  await expect(sheet).toBeVisible()
+
+  return sheet
+}
+
+/** Opens the Add bottom sheet on its Loan form and returns the sheet. */
+export async function openLoanForm(page: Page): Promise<Locator> {
+  const sheet = await openAddSheet(page)
+
+  await sheet.getByRole('button', { name: 'Loan', exact: true }).click()
+
+  return sheet
+}
+
+/** The ledger row of a given Entry type. */
+export function entryRow(page: Page, type: string): Locator {
+  return page.getByTestId('entry-list').locator(`li[data-entry-type="${type}"]`)
+}
+
+/** Opens a row's detail bottom sheet. */
+export async function openEntrySheet(page: Page, row: Locator): Promise<Locator> {
+  await row.getByRole('button').click()
+
+  const sheet = page.getByRole('dialog')
+
+  await expect(sheet).toBeVisible()
+
+  return sheet
 }

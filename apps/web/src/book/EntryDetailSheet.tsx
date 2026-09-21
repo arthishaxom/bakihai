@@ -1,14 +1,25 @@
 import {
   canVoidEntry,
   type EntryEnvelope,
+  LOAN_ENTRY_TYPE,
+  type LoanReturn,
+  type LoanState,
   type Member,
+  parseQuantityToHundredths,
   readVoidPayload,
   VOID_ENTRY_TYPE,
   VOID_REASON_MAX_LENGTH,
 } from '@bakihai/shared'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
-import type { VoidDraft } from './session'
-import { describeEntry, describeVoidedBy, formatOccurredAt, nameFor } from './summaries'
+import type { ReturnDraft, VoidDraft } from './session'
+import {
+  describeEntry,
+  describeVoidedBy,
+  type EntryNarrative,
+  formatOccurredAt,
+  formatQuantity,
+  nameFor,
+} from './summaries'
 
 const INPUT_CLASSES =
   'min-h-11 rounded-md border border-foreground/20 bg-transparent px-3 py-2 text-base'
@@ -17,11 +28,24 @@ const BUTTON_CLASSES = 'min-h-11 rounded-md px-4 py-2 font-medium'
 
 interface EntryDetailSheetProps {
   entry: EntryEnvelope
+  /** The Loan this Entry is, or the Loan a Return returns to, when it is in this book. */
+  loan?: LoanState | undefined
+  /** The Return this Entry is, when it is a Return. */
+  returned?: LoanReturn | undefined
+  /**
+   * The Loan Entry itself, for a Voided Loan the fold has dropped, so the
+   * sheet's heading still names the item.
+   */
+  loanEntry?: EntryEnvelope | undefined
   /** What this Entry Voided, when it is a Void and the target is in this book. */
   voidTarget?: EntryEnvelope | undefined
+  /** What the Voided Entry reads as, so a Void of a Loan names the item. */
+  voidTargetNarrative?: EntryNarrative | undefined
   /** The Void that Voided this Entry, when it is Voided. */
   voidedBy?: EntryEnvelope | undefined
   members: Member[]
+  /** Signs and writes a Return against `loan`; resolves once it is in the local book. */
+  onReturn: (input: ReturnDraft) => Promise<void>
   /** Signs and writes a Void of `entry`; resolves once it is in the local book. */
   onVoid: (input: VoidDraft) => Promise<void>
   onClose: () => void
@@ -29,10 +53,12 @@ interface EntryDetailSheetProps {
 
 /**
  * One Entry's detail bottom sheet, opened from its row in the book. It shows
- * what the Entry is, who wrote it, and — for an Entry that can still be
- * corrected — a Void action with an optional short reason. A Member Entry or a
- * Void offers no Void action (ADR-0014, #12), and an already-Voided Entry
- * offers none either, because a second Void would change nothing.
+ * what the Entry is, who wrote it, and — for an Entry that can still be acted
+ * on — a Void action with an optional short reason, and for a Loan with
+ * something outstanding a Return form and a one-tap Settle that closes the
+ * remainder as a full Return (ADR-0006). A Member Entry or a Void offers no
+ * Void action (ADR-0014, #12), and an already-Voided Entry offers none either,
+ * because a second Void would change nothing.
  *
  * The sheet is a native `<dialog>` shown modally: the browser gives it the top
  * layer, a focus trap, and Escape to dismiss for free, and CSS pins it to the
@@ -40,9 +66,14 @@ interface EntryDetailSheetProps {
  */
 export function EntryDetailSheet({
   entry,
+  loan,
+  returned,
+  loanEntry,
   voidTarget,
+  voidTargetNarrative,
   voidedBy,
   members,
+  onReturn,
   onVoid,
   onClose,
 }: EntryDetailSheetProps) {
@@ -50,6 +81,9 @@ export function EntryDetailSheet({
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [quantity, setQuantity] = useState('')
+  const [returnError, setReturnError] = useState<string | null>(null)
+  const [returning, setReturning] = useState(false)
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -60,6 +94,19 @@ export function EntryDetailSheet({
   }, [])
 
   const voidable = canVoidEntry(entry) && !voidedBy
+  // Return and Settle act on the Loan itself: a Return row, a Voided Loan, and
+  // a Loan with nothing left outstanding all offer neither.
+  const outstandingLoan = entry.type === LOAN_ENTRY_TYPE && !voidedBy ? loan : undefined
+  const remainingHundredths = outstandingLoan?.remainingHundredths ?? 0
+  // Optional properties cannot be handed over as undefined, so the narrative
+  // is only given the parts this Entry actually has.
+  const narrative: EntryNarrative = {
+    ...(voidTarget === undefined ? {} : { voidTarget }),
+    ...(voidTargetNarrative === undefined ? {} : { voidTargetNarrative }),
+    ...(loan === undefined ? {} : { loan }),
+    ...(returned === undefined ? {} : { returned }),
+    ...(loanEntry === undefined ? {} : { loanEntry }),
+  }
 
   async function handleVoid(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
@@ -75,6 +122,54 @@ export function EntryDetailSheet({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not void the Entry')
       setSubmitting(false)
+    }
+  }
+
+  async function handleReturn(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+
+    if (!outstandingLoan) {
+      return
+    }
+
+    const hundredths = parseQuantityToHundredths(quantity)
+
+    // The form is the gate the fold cannot be: Entries are immutable and the
+    // fold must stay total, so a Return past what is left is refused here and
+    // only ever surfaces as an over-returned marker if two phones raced it.
+    if (hundredths === null || hundredths <= 0) {
+      setReturnError('Enter a quantity like 1 or 1.5')
+      return
+    }
+
+    if (hundredths > outstandingLoan.remainingHundredths) {
+      setReturnError(
+        `Only ${formatQuantity(outstandingLoan.remainingHundredths, outstandingLoan.unit)} is left to return`,
+      )
+      return
+    }
+
+    await writeReturn(outstandingLoan.loanEntryId, hundredths)
+  }
+
+  async function handleSettle(): Promise<void> {
+    if (!outstandingLoan || outstandingLoan.remainingHundredths <= 0) {
+      return
+    }
+
+    await writeReturn(outstandingLoan.loanEntryId, outstandingLoan.remainingHundredths)
+  }
+
+  async function writeReturn(loanEntryId: string, quantityHundredths: number): Promise<void> {
+    setReturning(true)
+    setReturnError(null)
+
+    try {
+      await onReturn({ loanEntryId, quantityHundredths })
+      onClose()
+    } catch (cause) {
+      setReturnError(cause instanceof Error ? cause.message : 'Could not record the Return')
+      setReturning(false)
     }
   }
 
@@ -97,7 +192,7 @@ export function EntryDetailSheet({
       >
         <div className="flex items-start justify-between gap-4">
           <h2 id="entry-sheet-heading" className="font-semibold text-lg">
-            {describeEntry(entry, members, voidTarget)}
+            {describeEntry(entry, members, narrative)}
           </h2>
           <button
             type="button"
@@ -127,6 +222,54 @@ export function EntryDetailSheet({
 
         {entry.type === VOID_ENTRY_TYPE && readVoidPayload(entry) && !voidTarget ? (
           <p className="text-muted-foreground text-sm">The Entry it names is not in this book.</p>
+        ) : null}
+
+        {outstandingLoan && remainingHundredths > 0 ? (
+          <div className="flex flex-col gap-3 border-foreground/10 border-t pt-4">
+            <p data-testid="loan-outstanding" className="text-sm">
+              {formatQuantity(remainingHundredths, outstandingLoan.unit)} of{' '}
+              {outstandingLoan.itemLabel} is still out.
+            </p>
+            <form data-testid="return-form" onSubmit={handleReturn} className="flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                Quantity returned
+                <input
+                  name="quantity"
+                  value={quantity}
+                  onChange={(event) => setQuantity(event.target.value)}
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="0"
+                  className={INPUT_CLASSES}
+                />
+              </label>
+              {returnError ? (
+                <p role="alert" className="text-red-600 text-sm">
+                  {returnError}
+                </p>
+              ) : null}
+              <button
+                type="submit"
+                disabled={returning}
+                className={`${BUTTON_CLASSES} bg-foreground text-background disabled:opacity-50`}
+              >
+                {returning ? 'Recording…' : 'Record return'}
+              </button>
+            </form>
+            <button
+              type="button"
+              data-testid="settle-button"
+              onClick={handleSettle}
+              disabled={returning}
+              className={`${BUTTON_CLASSES} border border-foreground/20 disabled:opacity-50`}
+            >
+              Settle
+            </button>
+            <p className="text-muted-foreground text-sm">
+              Settle records a Return for the{' '}
+              {formatQuantity(remainingHundredths, outstandingLoan.unit)} left and closes the item.
+            </p>
+          </div>
         ) : null}
 
         {voidable ? (

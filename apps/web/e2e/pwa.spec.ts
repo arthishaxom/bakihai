@@ -1,5 +1,5 @@
 import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test'
-import { createGroup, joinGroup, memberNames } from './helpers'
+import { createGroup, joinGroup, memberNames, openAddSheet } from './helpers'
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
@@ -33,8 +33,10 @@ async function bookWithADinner(browser: Browser): Promise<{
   await joinGroup(mira, invite, 'Mira')
   await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira'])
 
-  await rohan.getByLabel('Amount (₹)').fill('900')
-  await rohan.getByRole('button', { name: 'Add expense' }).click()
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('900')
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(1)
 
   return { rohanContext, rohan, miraContext }

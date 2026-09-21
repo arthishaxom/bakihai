@@ -4,9 +4,15 @@ import {
   EXPENSE_ENTRY_TYPE,
   type ExpenseShare,
   expenseEntryPayloadSchema,
+  formatHundredthsAsQuantity,
   formatPaiseAsRupees,
+  LOAN_ENTRY_TYPE,
+  type LoanReturn,
+  type LoanState,
+  loanEntryPayloadSchema,
   MEMBER_ENTRY_TYPE,
   type Member,
+  RETURN_ENTRY_TYPE,
   readVoidPayload,
   VOID_ENTRY_TYPE,
 } from '@bakihai/shared'
@@ -25,8 +31,8 @@ export function formatOccurredAt(occurredAt: string): string {
   return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-/** Just enough of a Member to read their name in a summary. */
-type NamedMember = Pick<Member, 'deviceId' | 'displayName'>
+/** Just enough of a Member to read their name or pick them in a form. */
+export type NamedMember = Pick<Member, 'deviceId' | 'displayName'>
 
 /** The name a Member reads as, or "Someone" while the roster has not caught up. */
 export function nameFor(members: NamedMember[], deviceId: string): string {
@@ -35,16 +41,37 @@ export function nameFor(members: NamedMember[], deviceId: string): string {
 
 /**
  * What an Entry reads as in the book: real Expenses get money, a Void names
- * what it Voided, and the rest read as their type. A Void's `voidTarget` is
- * the Entry it names, when that Entry is in this book.
+ * what it Voided, Loans and Returns read as their item, and the rest read as
+ * their type. The narrative carries what the Entry itself cannot say: the
+ * Entry a Void names and the Loan a Loan or Return belongs to.
  */
 export function describeEntry(
   entry: EntryEnvelope,
   members: Member[],
-  voidTarget?: EntryEnvelope,
+  narrative: EntryNarrative = {},
 ): string {
   if (entry.type === VOID_ENTRY_TYPE) {
-    return describeVoid(entry, voidTarget, members)
+    return describeVoid(entry, narrative.voidTarget, members, narrative.voidTargetNarrative)
+  }
+
+  if (entry.type === LOAN_ENTRY_TYPE) {
+    if (narrative.loan) {
+      return describeLoan(narrative.loan, members)
+    }
+
+    const line = describeLoanEntry(entry, members)
+
+    if (line) {
+      return line
+    }
+  }
+
+  if (entry.type === RETURN_ENTRY_TYPE && narrative.returned) {
+    return describeReturn(
+      narrative.returned,
+      narrative.loan ?? loanContext(narrative.loanEntry),
+      members,
+    )
   }
 
   const expense = expenseEntryPayloadSchema.safeParse(entry.payload)
@@ -60,6 +87,138 @@ export function describeEntry(
 }
 
 /**
+ * What a row needs beyond its own Entry to read: the Entry a Void names, what
+ * that target itself reads as, and the Loan a Loan or Return belongs to.
+ */
+export interface EntryNarrative {
+  /** The Entry a Void names, when it is in this book. */
+  voidTarget?: EntryEnvelope
+  /** What the Voided Entry itself reads as, so a Void of a Loan names the item. */
+  voidTargetNarrative?: EntryNarrative
+  /** The Loan this Entry is, or the Loan a Return returns to. */
+  loan?: LoanState
+  /** The Return this Entry is, when it is a Return. */
+  returned?: LoanReturn
+  /**
+   * The Loan Entry itself, for lines the fold no longer holds: a Voided Loan
+   * still names its item on its own struck-through line.
+   */
+  loanEntry?: EntryEnvelope
+}
+
+/** A quantity with its unit when it has one: "3", "1.5 kg". */
+export function formatQuantity(hundredths: number, unit?: string): string {
+  const quantity = formatHundredthsAsQuantity(hundredths)
+
+  return unit === undefined ? quantity : `${quantity} ${unit}`
+}
+
+/** The item and quantity a Loan records: "3 eggs", "1.5 kg rice". */
+export function describeLoanItem(
+  quantityHundredths: number,
+  unit: string | undefined,
+  itemLabel: string,
+): string {
+  return `${formatQuantity(quantityHundredths, unit)} ${itemLabel}`
+}
+
+/** What a Loan needs to read: its item, quantity, and direction. */
+interface LoanLine {
+  lenderDeviceId: string
+  borrowerDeviceId: string
+  quantityHundredths: number
+  unit?: string | undefined
+  itemLabel: string
+}
+
+/** Who lent what to whom: "Rohan lent 1.5 kg rice to Mira". */
+function describeLoanLine(loan: LoanLine, members: Member[]): string {
+  const item = describeLoanItem(loan.quantityHundredths, loan.unit, loan.itemLabel)
+
+  return `${nameFor(members, loan.lenderDeviceId)} lent ${item} to ${nameFor(members, loan.borrowerDeviceId)}`
+}
+
+/**
+ * What a Loan reads as in the book: who lent what to whom, and what is still
+ * outstanding. An over-returned Loan names how far past its quantity the
+ * Returns went; a Loan with nothing left reads Settled.
+ */
+export function describeLoan(loan: LoanState, members: Member[]): string {
+  const line = describeLoanLine(loan, members)
+
+  if (loan.overReturnedByHundredths > 0) {
+    return `${line} · over-returned by ${formatQuantity(loan.overReturnedByHundredths, loan.unit)}`
+  }
+
+  if (loan.settled) {
+    return `${line} · Settled`
+  }
+
+  return `${line} · ${formatQuantity(loan.remainingHundredths, loan.unit)} left`
+}
+
+/**
+ * A Loan Entry's own line, read from its payload: for a Voided Loan, which the
+ * fold no longer holds, this is all its struck-through line says.
+ */
+export function describeLoanEntry(entry: EntryEnvelope, members: Member[]): string | undefined {
+  const payload = loanEntryPayloadSchema.safeParse(entry.payload)
+
+  if (!payload.success) {
+    return undefined
+  }
+
+  return describeLoanLine(payload.data, members)
+}
+
+/** What a Return needs from its Loan to read: the item, and who lent it. */
+type ReturnLoan = Pick<LoanState, 'itemLabel' | 'unit' | 'lenderDeviceId'>
+
+/** The same context, read from a Loan Entry the fold has dropped as Voided. */
+function loanContext(entry: EntryEnvelope | undefined): ReturnLoan | undefined {
+  if (!entry) {
+    return undefined
+  }
+
+  const payload = loanEntryPayloadSchema.safeParse(entry.payload)
+
+  if (!payload.success) {
+    return undefined
+  }
+
+  return {
+    itemLabel: payload.data.itemLabel,
+    ...(payload.data.unit === undefined ? {} : { unit: payload.data.unit }),
+    lenderDeviceId: payload.data.lenderDeviceId,
+  }
+}
+
+/**
+ * What a Return reads as: who gave back how much of which Loan's item. A Return
+ * the lender wrote by tapping Settle reads as settled rather than as the lender
+ * returning something to themselves; a Return whose Loan is not in the book
+ * reads without it.
+ */
+export function describeReturn(
+  returned: LoanReturn,
+  loan: ReturnLoan | undefined,
+  members: Member[],
+): string {
+  const author = nameFor(members, returned.entry.authorDeviceId)
+  const quantity = formatQuantity(returned.quantityHundredths, loan?.unit)
+
+  if (!loan) {
+    return `${author} returned ${quantity}`
+  }
+
+  if (returned.entry.authorDeviceId === loan.lenderDeviceId) {
+    return `${author} settled ${quantity} of ${loan.itemLabel}`
+  }
+
+  return `${author} returned ${quantity} of ${loan.itemLabel} to ${nameFor(members, loan.lenderDeviceId)}`
+}
+
+/**
  * What a Void reads as in the book: who Voided what. The reason stays on the
  * Voided line, where it reads next to what it explains.
  */
@@ -67,6 +226,7 @@ export function describeVoid(
   voidEntry: EntryEnvelope,
   target: EntryEnvelope | undefined,
   members: Member[],
+  targetNarrative: EntryNarrative = {},
 ): string {
   const voider = nameFor(members, voidEntry.authorDeviceId)
 
@@ -86,7 +246,7 @@ export function describeVoid(
     return `${voider} voided a Void, which is ignored`
   }
 
-  return `${voider} voided “${describeEntry(target, members)}”`
+  return `${voider} voided “${describeEntry(target, members, targetNarrative)}”`
 }
 
 /** The annotation a Voided line carries: who Voided it, and why. */

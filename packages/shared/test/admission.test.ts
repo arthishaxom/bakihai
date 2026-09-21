@@ -46,7 +46,7 @@ describe('admitEntries', () => {
         amountPaise: 90_000,
         participantDeviceIds: [mira.deviceId],
       }),
-      await entrySignedBy(rohan, rohan.deviceId, 'loan', { note: 'ignored by this version' }),
+      await entrySignedBy(rohan, rohan.deviceId, 'mystery', { note: 'ignored by this version' }),
     ]
 
     expect(admitEntries(entries)).toEqual(entries)

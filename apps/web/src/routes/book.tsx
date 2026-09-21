@@ -1,17 +1,21 @@
 import {
   buildInviteUrl,
   type EntryEnvelope,
+  LOAN_ENTRY_TYPE,
   MEMBER_ENTRY_TYPE,
+  RETURN_ENTRY_TYPE,
+  readReturnPayload,
   readVoidPayload,
   type SyncStatus,
 } from '@bakihai/shared'
 import { useMemo, useState } from 'react'
-import { AddExpenseForm } from '../book/AddExpenseForm'
+import { AddEntrySheet } from '../book/AddEntrySheet'
 import { EntryDetailSheet } from '../book/EntryDetailSheet'
 import {
   describeBalance,
   describeEntry,
   describeVoidedBy,
+  type EntryNarrative,
   formatOccurredAt,
 } from '../book/summaries'
 import { useBook } from '../book/useBook'
@@ -33,7 +37,7 @@ function compareTextDesc(left: string, right: string): number {
 
 /**
  * The book of the Group this device belongs to: its Members, its Balances, the
- * Add Expense form, its Entries newest first, and the invite action. Everything
+ * Add bottom sheet, its Entries newest first, and the invite action. Everything
  * is read from the local copy, so the screen is instant with no network
  * (ADR-0001) and Balances are folded, never stored (ADR-0004).
  */
@@ -52,15 +56,19 @@ function BookScreen({ identity }: { identity: Identity }) {
     entries,
     members,
     balances,
+    loans,
     voidsByTargetId,
     status,
     error,
     ready,
     writeExpense,
+    writeLoan,
+    writeReturn,
     writeVoid,
   } = useBook(identity)
   const inviteUrl = buildInviteUrl(window.location.origin, inviteForIdentity(identity))
   const [copied, setCopied] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   // useBook hands over only accepted Entries, so the ledger just leaves out
   // the Member Entries that announce the roster itself and orders the rest
@@ -83,9 +91,68 @@ function BookScreen({ identity }: { identity: Identity }) {
     (balance) => memberIds.has(balance.debtorDeviceId) && memberIds.has(balance.creditorDeviceId),
   )
   const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
+  // What each row needs beyond its own Entry: the Loan a Loan or Return
+  // belongs to, and for a Void the target's own narrative, so a Void of a Loan
+  // names the item rather than the type. A Voided Loan is no longer in the
+  // fold, so its line is read from its own Entry instead.
+  const narratives = useMemo(() => {
+    const byEntryId = new Map<string, EntryNarrative>()
+    const liveLoans = new Map(loans.map((loan) => [loan.loanEntryId, loan]))
+    const loanEntries = new Map(
+      entries
+        .filter((entry) => entry.type === LOAN_ENTRY_TYPE)
+        .map((entry) => [entry.id, entry] as const),
+    )
+
+    for (const [entryId, entry] of loanEntries) {
+      const live = liveLoans.get(entryId)
+
+      byEntryId.set(entryId, live ? { loan: live } : { loanEntry: entry })
+    }
+
+    for (const entry of entries) {
+      if (entry.type !== RETURN_ENTRY_TYPE) {
+        continue
+      }
+
+      const payload = readReturnPayload(entry)
+
+      if (!payload) {
+        continue
+      }
+
+      const live = liveLoans.get(payload.loanEntryId)
+      const loanEntry = loanEntries.get(payload.loanEntryId)
+
+      byEntryId.set(entry.id, {
+        returned: { entry, quantityHundredths: payload.quantityHundredths },
+        ...(live === undefined ? {} : { loan: live }),
+        ...(loanEntry === undefined ? {} : { loanEntry }),
+      })
+    }
+
+    for (const entry of entries) {
+      const targetId = readVoidPayload(entry)?.targetEntryId
+
+      if (targetId === undefined) {
+        continue
+      }
+
+      const voidTarget = entriesById.get(targetId)
+      const voidTargetNarrative = byEntryId.get(targetId)
+
+      byEntryId.set(entry.id, {
+        ...(byEntryId.get(entry.id) ?? {}),
+        ...(voidTarget === undefined ? {} : { voidTarget }),
+        ...(voidTargetNarrative === undefined ? {} : { voidTargetNarrative }),
+      })
+    }
+
+    return byEntryId
+  }, [entries, entriesById, loans])
   const selectedEntry = selectedEntryId === null ? undefined : entriesById.get(selectedEntryId)
-  const selectedTarget =
-    selectedEntry === undefined ? undefined : lookupVoidTarget(selectedEntry, entriesById)
+  const selectedNarrative =
+    selectedEntry === undefined ? undefined : narratives.get(selectedEntry.id)
   const selectedVoid =
     selectedEntry === undefined ? undefined : voidsByTargetId.get(selectedEntry.id)
 
@@ -103,7 +170,7 @@ function BookScreen({ identity }: { identity: Identity }) {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-8 p-6">
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-8 p-6 pb-24">
       <header className="flex items-start justify-between gap-4">
         <h1 className="font-semibold text-2xl tracking-tight">{identity.groupName}</h1>
         <span
@@ -163,12 +230,6 @@ function BookScreen({ identity }: { identity: Identity }) {
         ) : null}
       </section>
 
-      <AddExpenseForm
-        members={members}
-        viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
-        onSubmit={writeExpense}
-      />
-
       <section className="flex flex-col gap-2" aria-labelledby="entries-heading">
         <h2 id="entries-heading" className="font-semibold text-lg">
           Entries
@@ -191,7 +252,7 @@ function BookScreen({ identity }: { identity: Identity }) {
                     className="flex min-h-11 w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left"
                   >
                     <span className={voidEntry ? 'line-through' : 'font-medium'}>
-                      {describeEntry(entry, members, lookupVoidTarget(entry, entriesById))}
+                      {describeEntry(entry, members, narratives.get(entry.id))}
                     </span>
                     {voidEntry ? (
                       <span className="text-muted-foreground text-sm">
@@ -207,7 +268,7 @@ function BookScreen({ identity }: { identity: Identity }) {
             })}
           </ul>
         ) : ready ? (
-          <p className="text-muted-foreground">No entries yet. Add the first expense above.</p>
+          <p className="text-muted-foreground">No entries yet. Add the first one above.</p>
         ) : null}
       </section>
 
@@ -237,26 +298,40 @@ function BookScreen({ identity }: { identity: Identity }) {
         </div>
       </section>
 
+      <button
+        type="button"
+        data-testid="add-entry"
+        onClick={() => setAddOpen(true)}
+        className="fixed right-4 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] z-10 min-h-11 rounded-full bg-foreground px-5 py-3 font-medium text-background shadow-lg"
+      >
+        Add
+      </button>
+
+      {addOpen ? (
+        <AddEntrySheet
+          members={members}
+          viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
+          onExpense={writeExpense}
+          onLoan={writeLoan}
+          onClose={() => setAddOpen(false)}
+        />
+      ) : null}
+
       {selectedEntry ? (
         <EntryDetailSheet
           entry={selectedEntry}
-          voidTarget={selectedTarget}
+          loan={selectedNarrative?.loan}
+          returned={selectedNarrative?.returned}
+          loanEntry={selectedNarrative?.loanEntry}
+          voidTarget={selectedNarrative?.voidTarget}
+          voidTargetNarrative={selectedNarrative?.voidTargetNarrative}
           voidedBy={selectedVoid}
           members={members}
+          onReturn={writeReturn}
           onVoid={writeVoid}
           onClose={() => setSelectedEntryId(null)}
         />
       ) : null}
     </main>
   )
-}
-
-/** The Entry a Void names, when it names one that is in this book. */
-function lookupVoidTarget(
-  entry: EntryEnvelope,
-  entriesById: ReadonlyMap<string, EntryEnvelope>,
-): EntryEnvelope | undefined {
-  const targetId = readVoidPayload(entry)?.targetEntryId
-
-  return targetId === undefined ? undefined : entriesById.get(targetId)
 }
