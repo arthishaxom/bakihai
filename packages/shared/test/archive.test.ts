@@ -252,6 +252,19 @@ describe('archivedEntryIds', () => {
     expect(archived([dinner, paid, correction], FIFTEEN_DAYS_LATER).size).toBe(0)
   })
 
+  it('lets a skewed clock shift the archive view, never the arithmetic', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const loan = await lend(rohan, mira.deviceId, '2026-08-01T10:00:00.000Z')
+    // A Return whose device clock ran ahead settles the Loan at that future
+    // instant, so the deadline is measured from there and this device keeps the
+    // item visible a while longer. The item's arithmetic never reads the clock.
+    const returned = await recordReturn(mira, loan.id, '2999-01-01T00:00:00.000Z')
+
+    expect(archived([loan, returned], FIFTEEN_DAYS_LATER).size).toBe(0)
+    expect(foldLoans([loan, returned])[0]?.settled).toBe(true)
+  })
+
   it('reads only the Entries, so every device hides the same lines', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()

@@ -25,6 +25,13 @@ interface HarnessEntry {
 
 interface HarnessApi {
   addEntry(input: { note: string; amountPaise: number }): Promise<string>
+  /** Signs an Entry of any type as this harness device and writes it. */
+  addSignedEntry(input: {
+    type: string
+    payload: UnsignedEntryEnvelope['payload']
+  }): Promise<string>
+  /** This harness device's id, for payloads that name a Member. */
+  deviceId(): string
   /** Announces this harness device as a Member, so the app admits its Entries. */
   joinAs(displayName: string): Promise<string>
   /** Writes arbitrary JSON into the book at `key`, as a modified client would. */
@@ -201,6 +208,29 @@ window.harness = {
 
     return entry.id
   },
+  async addSignedEntry(input) {
+    // The harness is a Member, so its Entries pass admission; the payload is
+    // whatever the test asks for, valid or absurd, exactly like a modified
+    // client's.
+    const entry = await signEntryEnvelope(
+      {
+        id: uuidv7(),
+        schemaVersion: ENTRY_SCHEMA_VERSION,
+        authorDeviceId: deviceId,
+        signerPublicKey,
+        occurredAt: new Date().toISOString(),
+        type: input.type,
+        payload: input.payload,
+      },
+      deviceKeys.privateKey,
+    )
+
+    putEntry(doc, entry)
+    render()
+
+    return entry.id
+  },
+  deviceId: () => deviceId,
   injectRaw(key, value) {
     entriesMap(doc).set(key, value as EntryEnvelope)
     render()

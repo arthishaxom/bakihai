@@ -257,6 +257,151 @@ test('a payload rewritten under a known id and signature never hits the verifica
   await miraContext.close()
 })
 
+test('absurd amounts and quantities from a modified client never blank a phone', async ({
+  browser,
+}) => {
+  const rohanContext = await browser.newContext()
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  const miraContext = await browser.newContext()
+  const mira = await miraContext.newPage()
+  await joinGroup(mira, invite, 'Mira')
+  await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira'])
+
+  // An honest dinner first, so the crafted Entries below have an arithmetic to
+  // leave exactly as it was.
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('900')
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
+  await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohan ₹450'])
+
+  const rohanIdentity = await storedIdentity(rohan)
+  const miraIdentity = await storedIdentity(mira)
+  const harness = await openHarness(rohanContext, invitePayload(invite))
+
+  await harness.evaluate(() => window.harness.joinAs('Seed'))
+  await expect.poll(() => memberNames(mira)).toEqual(['Rohan', 'Mira', 'Seed'])
+
+  // A type this version does not know is ignored by the arithmetic, whatever
+  // its payload claims.
+  await harness.evaluate(() =>
+    window.harness.addSignedEntry({ type: 'treat', payload: { note: 'chai', amountPaise: 1 } }),
+  )
+
+  // An absurd Loan and two absurd Returns: each quantity is valid on its own,
+  // but their sum leaves the range where integer arithmetic is exact.
+  const loanId = await harness.evaluate(
+    (borrowerDeviceId) =>
+      window.harness.addSignedEntry({
+        type: 'loan',
+        payload: {
+          itemLabel: 'rice',
+          quantityHundredths: 300,
+          lenderDeviceId: window.harness.deviceId(),
+          borrowerDeviceId,
+        },
+      }),
+    rohanIdentity.deviceId,
+  )
+
+  for (let index = 0; index < 2; index++) {
+    await harness.evaluate(
+      (loanEntryId) =>
+        window.harness.addSignedEntry({
+          type: 'return',
+          payload: { loanEntryId, quantityHundredths: Number.MAX_SAFE_INTEGER },
+        }),
+      loanId,
+    )
+  }
+
+  // The Loan still reads and marks the over-return, and the honest Balance is
+  // exactly where it was.
+  await expect(mira.locator(`[data-entry-id="${loanId}"]`)).toContainText('over-returned by')
+  await expect(mira.getByRole('alert')).toHaveCount(0)
+  await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohan ₹450'])
+
+  // Two absurd Expenses on the same pair the dinner moved: the net leaves the
+  // range where integer arithmetic is exact, so it saturates at the ceiling
+  // instead of handing the screen a number no formatter can read.
+  for (let index = 0; index < 2; index++) {
+    await harness.evaluate(
+      ({ payerDeviceId, participantDeviceId }) =>
+        window.harness.addSignedEntry({
+          type: 'expense',
+          payload: {
+            amountPaise: Number.MAX_SAFE_INTEGER,
+            payerDeviceId,
+            participantDeviceIds: [participantDeviceId],
+          },
+        }),
+      { payerDeviceId: miraIdentity.deviceId, participantDeviceId: rohanIdentity.deviceId },
+    )
+  }
+
+  await expect.poll(() => balanceTexts(mira)).toEqual(['Rohan owes You ₹90071992547409.91'])
+  await expect(mira.getByRole('alert')).toHaveCount(0)
+
+  // The honest phone keeps working: a new Expense still writes and folds.
+  const miraSheet = await openAddSheet(mira)
+
+  await miraSheet.getByLabel('Amount (₹)').fill('100')
+  await miraSheet.getByRole('checkbox', { name: 'Seed' }).uncheck()
+  await miraSheet.getByRole('button', { name: 'Add expense' }).click()
+  await expect(mira.getByTestId('entry-list')).toContainText('Mira paid ₹100')
+  await expect(mira.getByRole('alert')).toHaveCount(0)
+
+  await rohanContext.close()
+  await miraContext.close()
+})
+
+test('a Settlement naming someone outside the roster never waits for a confirmation', async ({
+  browser,
+}) => {
+  const rohanContext = await browser.newContext()
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  const miraContext = await browser.newContext()
+  const mira = await miraContext.newPage()
+  await joinGroup(mira, invite, 'Mira')
+  await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira'])
+
+  const rohanIdentity = await storedIdentity(rohan)
+  const harness = await openHarness(rohanContext, invitePayload(invite))
+
+  await harness.evaluate(() => window.harness.joinAs('Seed'))
+  await expect.poll(() => memberNames(mira)).toEqual(['Rohan', 'Mira', 'Seed'])
+
+  // Seed records a payment from Rohan to a device id no Member holds: a real
+  // signed Entry naming a stranger. The Balance with them is not this Group's
+  // business, and neither is a confirmation that can never come.
+  await harness.evaluate(
+    (fromDeviceId) =>
+      window.harness.addSignedEntry({
+        type: 'settlement',
+        payload: {
+          fromDeviceId,
+          toDeviceId: window.harness.newId(),
+          amountPaise: 12_000,
+        },
+      }),
+    rohanIdentity.deviceId,
+  )
+
+  // The line stays in the book — history is history — but it never sits in the
+  // waiting count and never conjures a Balance with someone who is not here.
+  await expect(mira.getByTestId('entry-list')).toContainText('Rohan paid Someone ₹120')
+  await expect(mira.getByTestId('waiting-count')).toHaveCount(0)
+  await expect.poll(() => balanceTexts(mira)).toEqual([])
+  await expect(mira.getByRole('alert')).toHaveCount(0)
+
+  await rohanContext.close()
+  await miraContext.close()
+})
+
 test('the device signing key lives in IndexedDB, not in local storage', async ({ browser }) => {
   const rohanContext = await browser.newContext()
   const rohan = await rohanContext.newPage()

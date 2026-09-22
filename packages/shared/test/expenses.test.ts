@@ -339,6 +339,35 @@ describe('foldExpenses', () => {
     expect(state.settled).toBe(true)
   })
 
+  it('saturates absurd tagged payments at the exact-integer ceiling, in any order', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const dinner = await makeExpenseEntry(rohan, {
+      amountPaise: 50_000,
+      participantDeviceIds: [mira.deviceId],
+    })
+    // Two crafted claims can each carry the largest amount the schema holds, so
+    // their sum leaves the range where integer arithmetic is exact.
+    const first = await pay(mira, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: Number.MAX_SAFE_INTEGER,
+      tag: { kind: 'expense', entryId: dinner.id },
+    })
+    const second = await pay(mira, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: Number.MAX_SAFE_INTEGER,
+      tag: { kind: 'expense', entryId: dinner.id },
+    })
+    const entries = [dinner, first, second]
+    const state = onlyExpense(entries)
+
+    expect(state.coverage[0]?.paidPaise).toBe(Number.MAX_SAFE_INTEGER)
+    expect(state.coverage[0]?.coveredPaise).toBe(50_000)
+    expect(state.settled).toBe(true)
+    expect(Number.isSafeInteger(state.coveredPaise)).toBe(true)
+    expect(foldExpenses([...entries].reverse())).toEqual(foldExpenses(entries))
+  })
+
   it('needs no coverage for the payer sharing the cost', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()

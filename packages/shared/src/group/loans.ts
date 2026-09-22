@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { compareText, laterText } from '../compare'
 import { ENTRY_SCHEMA_VERSION, type EntryEnvelope, signEntryEnvelope } from '../entry-envelope'
 import { uuidv7 } from '../uuidv7'
+import { addSaturating } from './totals'
 import { foldVoids } from './voids'
 
 /** Entry type that records a Loan: a Member took a quantity of an item from another. */
@@ -220,7 +221,7 @@ function loanSettledAt(
   let returnedHundredths = 0
 
   for (const returned of ordered) {
-    returnedHundredths += returned.quantityHundredths
+    returnedHundredths = addSaturating(returnedHundredths, returned.quantityHundredths)
 
     if (returnedHundredths >= quantityHundredths) {
       // A Loan cannot have settled before it existed, however the clocks read.
@@ -242,7 +243,9 @@ function loanSettledAt(
  * Voided Entries drop out entirely, so a Voided Loan takes its Returns with it
  * and a Voided Return reopens what it had closed (ADR-0005). Entries this
  * version cannot read, and Returns whose Loan is not in the book, are ignored
- * rather than misread.
+ * rather than misread. The Returns' quantities are summed with saturation, so
+ * an absurd pile of crafted Returns stays inside exact integer arithmetic
+ * instead of folding a number no formatter can read (#21).
  */
 export function foldLoans(entries: EntryEnvelope[]): LoanState[] {
   const voidedByTarget = foldVoids(entries)
@@ -291,7 +294,7 @@ export function foldLoans(entries: EntryEnvelope[]): LoanState[] {
         compareText(left.entry.id, right.entry.id),
       )
       const returnedHundredths = returns.reduce(
-        (total, returned) => total + returned.quantityHundredths,
+        (total, returned) => addSaturating(total, returned.quantityHundredths),
         0,
       )
       const remainingHundredths = Math.max(0, payload.quantityHundredths - returnedHundredths)

@@ -268,6 +268,28 @@ describe('foldLoans', () => {
     expect(state.settled).toBe(true)
   })
 
+  it('saturates absurd Returns at the exact-integer ceiling, in any order', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const loan = await lend(rohan, {
+      itemLabel: 'eggs',
+      quantityHundredths: 300,
+      borrowerDeviceId: mira.deviceId,
+    })
+    // A crafted pair of Returns can each claim the largest quantity the schema
+    // holds, so their sum leaves the range where integer arithmetic is exact.
+    const first = await recordReturn(mira, loan.id, Number.MAX_SAFE_INTEGER)
+    const second = await recordReturn(rohan, loan.id, Number.MAX_SAFE_INTEGER)
+    const entries = [loan, first, second]
+    const state = onlyLoan(entries)
+
+    expect(state.returnedHundredths).toBe(Number.MAX_SAFE_INTEGER)
+    expect(state.overReturnedByHundredths).toBe(Number.MAX_SAFE_INTEGER - 300)
+    expect(state.settled).toBe(true)
+    expect(Number.isSafeInteger(state.overReturnedByHundredths)).toBe(true)
+    expect(foldLoans([...entries].reverse())).toEqual(foldLoans(entries))
+  })
+
   it('yields the same item whatever order the Entries arrive in', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()

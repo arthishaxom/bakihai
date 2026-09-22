@@ -3,6 +3,7 @@ import { compareText, laterText } from '../compare'
 import { ENTRY_SCHEMA_VERSION, type EntryEnvelope, signEntryEnvelope } from '../entry-envelope'
 import { uuidv7 } from '../uuidv7'
 import { foldSettlements, type SettlementState } from './settlements'
+import { addSaturating } from './totals'
 import { foldVoids } from './voids'
 
 /** Entry type that records an Expense: one Member paid, others share the cost. */
@@ -175,7 +176,7 @@ function expenseSettledAt(entry: EntryEnvelope, coverage: ExpenseCoverage[]): st
   for (const settlement of contributing) {
     paidByDevice.set(
       settlement.fromDeviceId,
-      (paidByDevice.get(settlement.fromDeviceId) ?? 0) + settlement.amountPaise,
+      addSaturating(paidByDevice.get(settlement.fromDeviceId) ?? 0, settlement.amountPaise),
     )
 
     const everyShareCovered = coverage.every(
@@ -205,7 +206,10 @@ function expenseSettledAt(entry: EntryEnvelope, coverage: ExpenseCoverage[]): st
  * also carries the instant it settled, so the archive deadline is computed
  * rather than stored (ADR-0005). The result is a pure function of the Entries —
  * the same book folds the same coverage in any order, on any clock — and
- * Entries this version cannot read are ignored rather than misread.
+ * Entries this version cannot read are ignored rather than misread. Tagged
+ * payments are summed with saturation, so an absurd pile of crafted claims
+ * stays inside exact integer arithmetic instead of folding a number no
+ * formatter can read (#21).
  */
 export function foldExpenses(entries: EntryEnvelope[]): ExpenseState[] {
   const voidedByTarget = foldVoids(entries)
@@ -245,7 +249,7 @@ export function foldExpenses(entries: EntryEnvelope[]): ExpenseState[] {
             settlement.fromDeviceId === share.deviceId && settlement.toDeviceId === payerDeviceId,
         )
         const paidPaise = settlements.reduce(
-          (total, settlement) => total + settlement.amountPaise,
+          (total, settlement) => addSaturating(total, settlement.amountPaise),
           0,
         )
         const coveredPaise = Math.min(paidPaise, share.amountPaise)

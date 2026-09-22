@@ -177,6 +177,12 @@ function BookScreen({ identity }: { identity: Identity }) {
   const visibleBalances = balances.filter(
     (balance) => memberIds.has(balance.debtorDeviceId) && memberIds.has(balance.creditorDeviceId),
   )
+  // The waiting count is between Members too: a claim naming someone the roster
+  // does not hold can never be confirmed here, so it never sits in limbo on the
+  // screens either.
+  const waitingSettlements = settlementsAwaitingConfirmation.filter(
+    (settlement) => memberIds.has(settlement.fromDeviceId) && memberIds.has(settlement.toDeviceId),
+  )
   const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
   // The items a Settlement can be tagged to: everything still open, newest
   // first. Settled items have nothing left to pay off (ADR-0004).
@@ -500,11 +506,11 @@ function BookScreen({ identity }: { identity: Identity }) {
         <h2 id="balances-heading" className="font-semibold text-lg">
           Balances
         </h2>
-        {settlementsAwaitingConfirmation.length > 0 ? (
+        {waitingSettlements.length > 0 ? (
           <p data-testid="waiting-count" className="text-muted-foreground text-sm">
-            {settlementsAwaitingConfirmation.length === 1
+            {waitingSettlements.length === 1
               ? '1 Settlement waiting for confirmation'
-              : `${settlementsAwaitingConfirmation.length} Settlements waiting for confirmation`}
+              : `${waitingSettlements.length} Settlements waiting for confirmation`}
           </p>
         ) : null}
         {visibleBalances.length > 0 ? (

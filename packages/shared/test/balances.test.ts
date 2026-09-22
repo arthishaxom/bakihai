@@ -274,6 +274,35 @@ describe('foldBalances', () => {
     ).toEqual(expected)
   })
 
+  it('saturates a net that leaves exact integer arithmetic, in any order', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    // Two crafted Expenses can each claim the largest amount the schema holds,
+    // so their sum leaves the range where integer arithmetic is exact. The net
+    // saturates at the ceiling instead of handing the screens a number no
+    // formatter can read.
+    const entries = [
+      await makeExpenseEntry(rohan, {
+        amountPaise: Number.MAX_SAFE_INTEGER,
+        participantDeviceIds: [mira.deviceId],
+      }),
+      await makeExpenseEntry(rohan, {
+        amountPaise: Number.MAX_SAFE_INTEGER,
+        participantDeviceIds: [mira.deviceId],
+      }),
+    ]
+    const expected = [
+      {
+        debtorDeviceId: mira.deviceId,
+        creditorDeviceId: rohan.deviceId,
+        amountPaise: Number.MAX_SAFE_INTEGER,
+      },
+    ]
+
+    expect(foldBalances(entries)).toEqual(expected)
+    expect(foldBalances([...entries].reverse())).toEqual(expected)
+  })
+
   it('ignores a Settlement payload this version cannot read', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
