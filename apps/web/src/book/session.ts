@@ -3,6 +3,7 @@ import {
   createBookDoc,
   createExpenseEntry,
   createLoanEntry,
+  createMemberArchivedEntry,
   createMemberEntry,
   createPaymentAddressEntry,
   createReturnEntry,
@@ -62,6 +63,12 @@ export interface VoidDraft {
   reason?: string
 }
 
+/** The fields a Member row decides when archiving; the session signs and writes it. */
+export interface MemberArchiveDraft {
+  /** The device id of the Member whose phone is gone. */
+  memberDeviceId: string
+}
+
 /** The fields a Settlement form decides; the session signs and writes the Settlement. */
 export interface SettlementDraft {
   fromDeviceId: string
@@ -104,6 +111,11 @@ export interface BookSession {
   writeLoanSettle(input: LoanSettleDraft): Promise<void>
   /** Signs and writes a Void to the local book; it syncs like any other Entry. */
   writeVoid(input: VoidDraft): Promise<void>
+  /**
+   * Signs and writes a Member-archive marker to the local book; it syncs like
+   * any other Entry, and Voiding it is how an archive is undone.
+   */
+  writeMemberArchive(input: MemberArchiveDraft): Promise<void>
   /** Signs and writes a Settlement to the local book; it syncs like any other Entry. */
   writeSettlement(input: SettlementDraft): Promise<void>
   /** Signs and writes a Confirm of a Settlement to the local book. */
@@ -229,6 +241,17 @@ function createBookSession(identity: Identity): BookSession {
         privateKey,
         targetEntryId: input.targetEntryId,
         ...(input.reason === undefined ? {} : { reason: input.reason }),
+      })
+
+      putEntry(doc, entry)
+    },
+    async writeMemberArchive(input) {
+      const privateKey = await deviceKey()
+      const entry = await createMemberArchivedEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        memberDeviceId: input.memberDeviceId,
       })
 
       putEntry(doc, entry)

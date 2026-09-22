@@ -16,6 +16,7 @@ import { describeBalance, type NamedMember, nameFor, type SettlementTagOption } 
 export function SettleUpSheet({
   balance,
   members,
+  archivedDeviceIds,
   viewer,
   tagOptions,
   onSettle,
@@ -23,6 +24,8 @@ export function SettleUpSheet({
 }: {
   balance: Balance
   members: Member[]
+  /** The Archived Members, so a net that involves one is marked like its row. */
+  archivedDeviceIds: ReadonlySet<string>
   viewer: NamedMember
   /** The items a tag may name; none when nothing is open to tag. */
   tagOptions?: SettlementTagOption[] | undefined
@@ -75,7 +78,7 @@ export function SettleUpSheet({
         </div>
 
         <p data-testid="settle-up-net" className="text-sm">
-          {describeBalance(balance, members, viewer.deviceId)}
+          {describeBalance(balance, members, viewer.deviceId, archivedDeviceIds)}
         </p>
         <p className="text-muted-foreground text-sm">
           Writes a Settlement from {nameFor(members, balance.debtorDeviceId)} to{' '}

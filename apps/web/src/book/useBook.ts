@@ -8,6 +8,7 @@ import {
   foldBalances,
   foldExpenses,
   foldLoans,
+  foldMemberArchives,
   foldMembers,
   foldPaymentAddresses,
   foldSettlements,
@@ -28,6 +29,7 @@ import {
   getBookSession,
   type LoanDraft,
   type LoanSettleDraft,
+  type MemberArchiveDraft,
   type PaymentAddressDraft,
   type ReturnDraft,
   type SettlementConfirmDraft,
@@ -44,6 +46,13 @@ export interface BookView {
   entries: EntryEnvelope[]
   /** The Group roster folded from the book's Member Entries. */
   members: Member[]
+  /**
+   * The Member-archive marker in force for each Archived Member, keyed by
+   * their device id. Archived Members stay in `members` — their Entries and
+   * Balances are untouched — and the screens leave them out of pickers and
+   * group them under Archived (ADR-0014).
+   */
+  memberArchives: ReadonlyMap<string, EntryEnvelope>
   /** Pairwise Balances folded from the book's Expense Entries, zeroes already gone. */
   balances: Balance[]
   /** Expense states folded from the book's Expense and tagged Settlement Entries. */
@@ -86,6 +95,8 @@ export interface BookView {
   writeLoanSettle(input: LoanSettleDraft): Promise<void>
   /** Signs and writes a Void to the local book. */
   writeVoid(input: VoidDraft): Promise<void>
+  /** Signs and writes a Member-archive marker to the local book. */
+  writeMemberArchive(input: MemberArchiveDraft): Promise<void>
   /** Signs and writes a Settlement to the local book. */
   writeSettlement(input: SettlementDraft): Promise<void>
   /** Signs and writes a Confirm of a Settlement to the local book. */
@@ -129,6 +140,7 @@ export function useBook(identity: Identity): BookView {
   // Entry to the roster. Every fold below sees the same accepted Entries.
   const entries = useMemo(() => admitEntries(verified.entries), [verified.entries])
   const members = useMemo(() => foldMembers(entries), [entries])
+  const memberArchives = useMemo(() => foldMemberArchives(entries), [entries])
   const balances = useMemo(() => foldBalances(entries), [entries])
   const expenses = useMemo(() => foldExpenses(entries), [entries])
   const loans = useMemo(() => foldLoans(entries), [entries])
@@ -143,6 +155,7 @@ export function useBook(identity: Identity): BookView {
   return {
     entries,
     members,
+    memberArchives,
     balances,
     expenses,
     loans,
@@ -158,6 +171,7 @@ export function useBook(identity: Identity): BookView {
     writeReturn: session.writeReturn,
     writeLoanSettle: session.writeLoanSettle,
     writeVoid: session.writeVoid,
+    writeMemberArchive: session.writeMemberArchive,
     writeSettlement: session.writeSettlement,
     writeSettlementConfirm: session.writeSettlementConfirm,
     writePaymentAddress: session.writePaymentAddress,

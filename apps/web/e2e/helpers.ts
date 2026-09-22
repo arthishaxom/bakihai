@@ -40,12 +40,40 @@ export async function joinGroup(page: Page, inviteUrl: string, displayName: stri
   await expect(page.getByLabel('Invite link')).toBeVisible()
 }
 
-/** The display names in a device's folded Member list, in fold order. */
-export function memberNames(page: Page): Promise<string[]> {
+/** The `data-member-name`s of the rows in a Member list, in list order. */
+function memberNamesIn(page: Page, listTestId: string): Promise<string[]> {
   return page
-    .getByTestId('member-list')
+    .getByTestId(listTestId)
     .locator('li')
     .evaluateAll((items) => items.map((item) => item.getAttribute('data-member-name') ?? ''))
+}
+
+/** The row for a display name inside a Member list, on whichever phone is looking. */
+function memberRowIn(page: Page, listTestId: string, displayName: string): Locator {
+  return page
+    .getByTestId(listTestId)
+    .locator('li')
+    .filter({ has: page.getByText(displayName, { exact: true }) })
+}
+
+/** The display names in a device's folded Member list, in fold order. */
+export function memberNames(page: Page): Promise<string[]> {
+  return memberNamesIn(page, 'member-list')
+}
+
+/** The display names in a device's Archived Member list, in fold order. */
+export function archivedMemberNames(page: Page): Promise<string[]> {
+  return memberNamesIn(page, 'archived-member-list')
+}
+
+/** The active Member row for a display name, on whichever phone is looking. */
+export function memberRow(page: Page, displayName: string): Locator {
+  return memberRowIn(page, 'member-list', displayName)
+}
+
+/** The Archived Member row for a display name, on whichever phone is looking. */
+export function archivedMemberRow(page: Page, displayName: string): Locator {
+  return memberRowIn(page, 'archived-member-list', displayName)
 }
 
 /** The text of each Balance row on a device, in fold order. */

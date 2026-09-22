@@ -65,5 +65,5 @@ An Entry that cancels an earlier Entry while both remain in the book.
 _Avoid_: delete, remove, cancel
 
 **Archived**:
-Hidden from the active view but still in the book. A Settled Expense or Loan archives 14 days after it became Settled, the deadline computed from the Entries and never stored.
+Hidden from the active view but still in the book. A Settled Expense or Loan archives 14 days after it became Settled, the deadline computed from the Entries and never stored. A Member whose phone is gone is Archived by a marker Entry any Member may write; Voiding the marker restores them.
 _Avoid_: deleted, cleared, removed

@@ -12,10 +12,12 @@ import {
   type LoanReturn,
   type LoanState,
   loanEntryPayloadSchema,
+  MEMBER_ARCHIVED_ENTRY_TYPE,
   MEMBER_ENTRY_TYPE,
   type Member,
   PAYMENT_ADDRESS_ENTRY_TYPE,
   RETURN_ENTRY_TYPE,
+  readMemberArchivedPayload,
   readPaymentAddressPayload,
   readSettlementConfirmPayload,
   readSettlementPayload,
@@ -64,6 +66,16 @@ export function describeEntry(
 ): string {
   if (entry.type === VOID_ENTRY_TYPE) {
     return describeVoid(entry, narrative.voidTarget, members, narrative.voidTargetNarrative)
+  }
+
+  // An archive marker names its Member by device id, so its line reads even
+  // when the marker itself is Voided and the fold no longer holds it.
+  if (entry.type === MEMBER_ARCHIVED_ENTRY_TYPE) {
+    const payload = readMemberArchivedPayload(entry)
+
+    return payload === undefined
+      ? entry.type
+      : `${nameFor(members, entry.authorDeviceId)} archived ${nameFor(members, payload.memberDeviceId)}`
   }
 
   if (entry.type === LOAN_ENTRY_TYPE) {
@@ -553,23 +565,30 @@ export function describeShares(input: {
     .join(', ')}`
 }
 
-/** What a Balance reads as on this device, always from the viewer's side outward. */
+/**
+ * What a Balance reads as on this device, always from the viewer's side
+ * outward. A Balance that involves an Archived Member still reads — their
+ * Entries and money are untouched — and is marked Archived so the row says why
+ * the name is no longer in the active list (ADR-0014).
+ */
 export function describeBalance(
   balance: Balance,
   members: Member[],
   viewerDeviceId: string,
+  archivedDeviceIds: ReadonlySet<string>,
 ): string {
   const debtor = nameFor(members, balance.debtorDeviceId)
   const creditor = nameFor(members, balance.creditorDeviceId)
   const amount = formatRupees(balance.amountPaise)
+  const archived =
+    archivedDeviceIds.has(balance.debtorDeviceId) || archivedDeviceIds.has(balance.creditorDeviceId)
 
-  if (balance.debtorDeviceId === viewerDeviceId) {
-    return `You owe ${creditor} ${amount}`
-  }
+  const line =
+    balance.debtorDeviceId === viewerDeviceId
+      ? `You owe ${creditor} ${amount}`
+      : balance.creditorDeviceId === viewerDeviceId
+        ? `${debtor} owes You ${amount}`
+        : `${debtor} owes ${creditor} ${amount}`
 
-  if (balance.creditorDeviceId === viewerDeviceId) {
-    return `${debtor} owes You ${amount}`
-  }
-
-  return `${debtor} owes ${creditor} ${amount}`
+  return archived ? `${line} · Archived` : line
 }

@@ -82,6 +82,7 @@ function BookScreen({ identity }: { identity: Identity }) {
   const {
     entries,
     members,
+    memberArchives,
     balances,
     expenses,
     loans,
@@ -97,6 +98,7 @@ function BookScreen({ identity }: { identity: Identity }) {
     writeReturn,
     writeLoanSettle,
     writeVoid,
+    writeMemberArchive,
     writeSettlement,
     writeSettlementConfirm,
     writePaymentAddress,
@@ -107,6 +109,8 @@ function BookScreen({ identity }: { identity: Identity }) {
   const [addressOpen, setAddressOpen] = useState(false)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [settlingBalance, setSettlingBalance] = useState<Balance | null>(null)
+  const [memberActionError, setMemberActionError] = useState<string | null>(null)
+  const [memberActionPending, setMemberActionPending] = useState(false)
   // The chosen chip is a device preference and survives a reload; Show hidden is
   // view state for this visit, so a fresh look at the book starts quiet.
   const [filter, setFilter] = useState<LedgerFilter>(loadLedgerFilter)
@@ -151,6 +155,18 @@ function BookScreen({ identity }: { identity: Identity }) {
     [ledgerEntries, voidsByTargetId, archivedIds, filter, showHidden],
   )
   const memberIds = useMemo(() => new Set(members.map((member) => member.deviceId)), [members])
+  // Archived Members stay in the roster — their Entries and Balances are
+  // untouched — but leave every picker and group under Archived at the bottom
+  // of the Member list (ADR-0014).
+  const archivedMemberIds = useMemo(() => new Set(memberArchives.keys()), [memberArchives])
+  const activeMembers = useMemo(
+    () => members.filter((member) => !archivedMemberIds.has(member.deviceId)),
+    [members, archivedMemberIds],
+  )
+  const archivedMembers = useMemo(
+    () => members.filter((member) => archivedMemberIds.has(member.deviceId)),
+    [members, archivedMemberIds],
+  )
   // Balances are between Members: an accepted Entry can still name someone who
   // is not in the roster, and a Balance with them is not this Group's business.
   const visibleBalances = balances.filter(
@@ -281,6 +297,30 @@ function BookScreen({ identity }: { identity: Identity }) {
     saveLedgerFilter(next)
   }
 
+  /**
+   * Runs a Member-row action — archiving a Member whose phone is gone, or
+   * Voiding the marker to restore one — one at a time, and keeps a failure on
+   * screen beside the list instead of losing it in a tap. A second tap while
+   * one is in flight is dropped: two markers for one Member would take two
+   * undos to clear.
+   */
+  async function runMemberAction(action: () => Promise<void>): Promise<void> {
+    if (memberActionPending) {
+      return
+    }
+
+    setMemberActionPending(true)
+    setMemberActionError(null)
+
+    try {
+      await action()
+    } catch (cause) {
+      setMemberActionError(cause instanceof Error ? cause.message : 'Could not update the Member')
+    } finally {
+      setMemberActionPending(false)
+    }
+  }
+
   async function copyInvite(): Promise<void> {
     try {
       await navigator.clipboard.writeText(inviteUrl)
@@ -313,8 +353,13 @@ function BookScreen({ identity }: { identity: Identity }) {
         <h2 id="members-heading" className="font-semibold text-lg">
           Members
         </h2>
+        {memberActionError ? (
+          <p role="alert" className="text-sm text-red-600">
+            {memberActionError}
+          </p>
+        ) : null}
         <ul data-testid="member-list" className="flex flex-col gap-1">
-          {members.map((member) => {
+          {activeMembers.map((member) => {
             const address = paymentAddresses.get(member.deviceId)
 
             return (
@@ -325,29 +370,52 @@ function BookScreen({ identity }: { identity: Identity }) {
               >
                 {member.deviceId === identity.deviceId ? (
                   // Your own row opens the Payment address sheet; everyone
-                  // else's row just shows the address to pay them at.
+                  // else's row shows the address to pay them at and offers to
+                  // archive them once their phone is gone.
                   <button
                     type="button"
                     data-testid="own-member"
                     onClick={() => setAddressOpen(true)}
                     className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left"
                   >
-                    <span>
+                    <span className="min-w-0 truncate">
                       {member.displayName}
                       <span className="text-muted-foreground"> (you)</span>
                     </span>
-                    <span data-testid="member-upi" className="text-muted-foreground text-sm">
+                    <span
+                      data-testid="member-upi"
+                      className="shrink-0 text-muted-foreground text-sm"
+                    >
                       {address ? address.upiId : 'Set UPI ID'}
                     </span>
                   </button>
                 ) : (
                   <div className="flex min-h-11 w-full items-center justify-between gap-2 px-2 py-1.5">
-                    <span>{member.displayName}</span>
-                    {address ? (
-                      <span data-testid="member-upi" className="text-muted-foreground text-sm">
-                        {address.upiId}
-                      </span>
-                    ) : null}
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="truncate">{member.displayName}</span>
+                      {address ? (
+                        <span
+                          data-testid="member-upi"
+                          className="truncate text-muted-foreground text-sm"
+                        >
+                          {address.upiId}
+                        </span>
+                      ) : null}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="archive-member"
+                      aria-label={`Archive ${member.displayName}`}
+                      disabled={memberActionPending}
+                      onClick={() =>
+                        runMemberAction(() =>
+                          writeMemberArchive({ memberDeviceId: member.deviceId }),
+                        )
+                      }
+                      className="min-h-11 shrink-0 rounded-md border border-foreground/20 px-3 py-2 text-sm disabled:opacity-50"
+                    >
+                      Archive
+                    </button>
                   </div>
                 )}
               </li>
@@ -357,6 +425,45 @@ function BookScreen({ identity }: { identity: Identity }) {
             <li className="text-muted-foreground">No members yet.</li>
           ) : null}
         </ul>
+        {archivedMembers.length > 0 ? (
+          <div data-testid="archived-members" className="flex flex-col gap-1">
+            <h3 className="font-medium text-muted-foreground text-sm">Archived</h3>
+            <ul data-testid="archived-member-list" className="flex flex-col gap-1">
+              {archivedMembers.map((member) => {
+                const marker = memberArchives.get(member.deviceId)
+
+                return (
+                  <li
+                    key={member.deviceId}
+                    data-member-name={member.displayName}
+                    className="flex min-h-11 items-center justify-between gap-2 px-2 py-1.5"
+                  >
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="truncate">{member.displayName}</span>
+                      <span className="shrink-0 text-muted-foreground text-sm">Archived</span>
+                    </span>
+                    {marker ? (
+                      // Undo is a Void of the marker Entry, so the archive stays
+                      // in the book and the Member returns to the active list.
+                      <button
+                        type="button"
+                        data-testid="unarchive-member"
+                        aria-label={`Unarchive ${member.displayName}`}
+                        disabled={memberActionPending}
+                        onClick={() =>
+                          runMemberAction(() => writeVoid({ targetEntryId: marker.id }))
+                        }
+                        className="min-h-11 shrink-0 rounded-md border border-foreground/20 px-3 py-2 text-sm disabled:opacity-50"
+                      >
+                        Unarchive
+                      </button>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
       </section>
 
       <section className="flex flex-col gap-2" aria-labelledby="balances-heading">
@@ -380,7 +487,7 @@ function BookScreen({ identity }: { identity: Identity }) {
                 className="flex min-h-11 items-center justify-between gap-2"
               >
                 <span data-balance-text>
-                  {describeBalance(balance, members, identity.deviceId)}
+                  {describeBalance(balance, members, identity.deviceId, archivedMemberIds)}
                 </span>
                 <button
                   type="button"
@@ -518,7 +625,7 @@ function BookScreen({ identity }: { identity: Identity }) {
 
       {addOpen ? (
         <AddEntrySheet
-          members={members}
+          members={activeMembers}
           viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
           tagOptions={tagOptions}
           onExpense={writeExpense}
@@ -532,6 +639,7 @@ function BookScreen({ identity }: { identity: Identity }) {
         <SettleUpSheet
           balance={settlingBalance}
           members={members}
+          archivedDeviceIds={archivedMemberIds}
           viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
           tagOptions={tagOptions}
           onSettle={writeSettlement}

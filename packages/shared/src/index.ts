@@ -96,6 +96,15 @@ export {
   returnEntryPayloadSchema,
 } from './group/loans'
 export {
+  type CreateMemberArchivedEntryInput,
+  createMemberArchivedEntry,
+  foldMemberArchives,
+  MEMBER_ARCHIVED_ENTRY_TYPE,
+  type MemberArchivedEntryPayload,
+  memberArchivedEntryPayloadSchema,
+  readMemberArchivedPayload,
+} from './group/member-archives'
+export {
   type CreateMemberEntryInput,
   createMemberEntry,
   foldMemberKeys,
