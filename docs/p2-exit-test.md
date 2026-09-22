@@ -1,6 +1,6 @@
 # P2 exit test: a week with the group's own phones
 
-> **Superseded (2026-09-22).** The group never put the app on their own phones, so this test cannot run. Its replacement is the solo, one-sided test planned as `docs/p3-exit-test.md` (#25); the two-phone automated coverage this document leans on still stands. See the closing comment on #21.
+> **Superseded (2026-09-22).** The group never put the app on their own phones, so this test cannot run. Its replacement is the solo, one-sided test in `docs/p3-exit-test.md` (#25); the two-phone automated coverage this document leans on still stands. See the closing comment on #21.
 
 The P2 exit criterion is human: the group keeps using BakiHai on their own phones for a week and every phone tells the same story about Loans, Returns, Settlements, and Voids. The automated suite rehearses the mechanics — the folds in `packages/shared/test`, and two-phone convergence and the new sheets in `apps/web/e2e` — but only real days catch what a test cannot. Run this after the features in #12–#19 ship.
 
