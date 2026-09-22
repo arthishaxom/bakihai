@@ -13,6 +13,7 @@ import {
   SETTLEMENT_ENTRY_TYPE,
   type SyncStatus,
 } from '@bakihai/shared'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { AddEntrySheet } from '../book/AddEntrySheet'
 import { EntryDetailSheet } from '../book/EntryDetailSheet'
@@ -79,6 +80,10 @@ export function BookPage() {
 }
 
 function BookScreen({ identity }: { identity: Identity }) {
+  const navigate = useNavigate()
+  // An invite for another Group sent this device here; the notice names that
+  // Group beside this book's, and dismissing it clears the search param.
+  const { inviteFor } = useSearch({ from: '/' })
   const {
     entries,
     members,
@@ -321,6 +326,11 @@ function BookScreen({ identity }: { identity: Identity }) {
     }
   }
 
+  /** Dismissing the invite notice clears it from the URL, leaving no state behind. */
+  function dismissInviteNotice(): void {
+    void navigate({ to: '/', search: {}, replace: true })
+  }
+
   async function copyInvite(): Promise<void> {
     try {
       await navigator.clipboard.writeText(inviteUrl)
@@ -342,6 +352,26 @@ function BookScreen({ identity }: { identity: Identity }) {
           {SYNC_LABELS[status]}
         </span>
       </header>
+
+      {inviteFor !== undefined ? (
+        // Opening another Group's invite does not switch this phone: the notice
+        // names both Groups, and the book below is untouched.
+        <div
+          data-testid="invite-notice"
+          className="flex items-start justify-between gap-3 rounded-md border border-foreground/20 px-3 py-2"
+        >
+          <p className="text-sm">
+            This invite is for “{inviteFor}”. This phone is still showing “{identity.groupName}”.
+          </p>
+          <button
+            type="button"
+            onClick={dismissInviteNotice}
+            className="min-h-11 shrink-0 text-sm underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       {error ? (
         <p role="alert" className="text-sm text-red-600">
