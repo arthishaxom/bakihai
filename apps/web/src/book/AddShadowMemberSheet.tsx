@@ -17,7 +17,7 @@ export function AddShadowMemberSheet({
   onAdd,
   onClose,
 }: {
-  /** The active roster, so a name already in the Group can be flagged. */
+  /** The Group roster, so a name already in the Group can be flagged. */
   members: NamedMember[]
   onAdd: (input: ShadowMemberDraft) => Promise<void>
   onClose: () => void

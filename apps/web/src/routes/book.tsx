@@ -33,6 +33,7 @@ import {
   describeEntry,
   describeSettlementStatus,
   describeSettlementTags,
+  describeShadowHolder,
   describeVoidedBy,
   type EntryNarrative,
   formatOccurredAt,
@@ -413,10 +414,6 @@ function BookScreen({ identity }: { identity: Identity }) {
           {activeMembers.map((member) => {
             const address = paymentAddresses.get(member.deviceId)
             const holderId = shadowHolders.get(member.deviceId)
-            const holder =
-              holderId === undefined
-                ? undefined
-                : members.find((candidate) => candidate.deviceId === holderId)
 
             return (
               <li
@@ -449,13 +446,12 @@ function BookScreen({ identity }: { identity: Identity }) {
                   <div className="flex min-h-11 w-full items-center justify-between gap-2 px-2 py-1.5">
                     <span className="flex min-w-0 items-baseline gap-2">
                       <span className="truncate">{member.displayName}</span>
-                      {holder ? (
+                      {holderId !== undefined ? (
                         <span
                           data-testid="member-shadow-note"
                           className="truncate text-muted-foreground text-sm"
                         >
-                          No phone · Added by{' '}
-                          {holder.deviceId === identity.deviceId ? 'you' : holder.displayName}
+                          {describeShadowHolder(members, holderId, identity.deviceId)}
                         </span>
                       ) : address ? (
                         <span
@@ -503,6 +499,7 @@ function BookScreen({ identity }: { identity: Identity }) {
             <ul data-testid="archived-member-list" className="flex flex-col gap-1">
               {archivedMembers.map((member) => {
                 const marker = memberArchives.get(member.deviceId)
+                const holderId = shadowHolders.get(member.deviceId)
 
                 return (
                   <li
@@ -512,6 +509,14 @@ function BookScreen({ identity }: { identity: Identity }) {
                   >
                     <span className="flex min-w-0 items-baseline gap-2">
                       <span className="truncate">{member.displayName}</span>
+                      {holderId !== undefined ? (
+                        <span
+                          data-testid="member-shadow-note"
+                          className="truncate text-muted-foreground text-sm"
+                        >
+                          {describeShadowHolder(members, holderId, identity.deviceId)}
+                        </span>
+                      ) : null}
                       <span className="shrink-0 text-muted-foreground text-sm">Archived</span>
                     </span>
                     {marker ? (
@@ -730,7 +735,7 @@ function BookScreen({ identity }: { identity: Identity }) {
 
       {shadowMemberOpen ? (
         <AddShadowMemberSheet
-          members={activeMembers}
+          members={members}
           onAdd={writeShadowMember}
           onClose={() => setShadowMemberOpen(false)}
         />

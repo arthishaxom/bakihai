@@ -54,6 +54,20 @@ export function nameFor(members: NamedMember[], deviceId: string): string {
 }
 
 /**
+ * The note a Shadow Member's row carries: they have no phone, and this names
+ * the Member whose key holds theirs (ADR-0020).
+ */
+export function describeShadowHolder(
+  members: NamedMember[],
+  holderDeviceId: string,
+  viewerDeviceId: string,
+): string {
+  return holderDeviceId === viewerDeviceId
+    ? 'No phone · Added by you'
+    : `No phone · Added by ${nameFor(members, holderDeviceId)}`
+}
+
+/**
  * What an Entry reads as in the book: real Expenses get money, a Void names
  * what it Voided, Loans and Returns read as their item, and the rest read as
  * their type. The narrative carries what the Entry itself cannot say: the

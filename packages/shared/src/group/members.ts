@@ -100,6 +100,27 @@ function memberClaims(entries: EntryEnvelope[]): FoldedMember[] {
 }
 
 /**
+ * One claim per device id, in binding order: the first Member Entry by Entry
+ * id fixes a device id to its signing key, and later claims cannot rebind it
+ * (ADR-0012). Every fold that reads bindings starts from this list.
+ */
+function boundClaims(entries: EntryEnvelope[]): FoldedMember[] {
+  const bound = new Set<string>()
+  const claims: FoldedMember[] = []
+
+  for (const claim of memberClaims(entries)) {
+    if (bound.has(claim.deviceId)) {
+      continue
+    }
+
+    bound.add(claim.deviceId)
+    claims.push(claim)
+  }
+
+  return claims
+}
+
+/**
  * The signing key each device is bound to, folded from Member Entries: the
  * first claim for a device id fixes it to that key, and no later Entry can
  * rebind it (ADR-0007, #8). Entries from devices with no readable Member
@@ -108,10 +129,8 @@ function memberClaims(entries: EntryEnvelope[]): FoldedMember[] {
 export function foldMemberKeys(entries: EntryEnvelope[]): Map<string, string> {
   const keys = new Map<string, string>()
 
-  for (const claim of memberClaims(entries)) {
-    if (!keys.has(claim.deviceId)) {
-      keys.set(claim.deviceId, claim.signerPublicKey)
-    }
+  for (const claim of boundClaims(entries)) {
+    keys.set(claim.deviceId, claim.signerPublicKey)
   }
 
   return keys
@@ -122,21 +141,14 @@ export function foldMemberKeys(entries: EntryEnvelope[]): Map<string, string> {
  * (ADR-0020): a key's first claimant by Entry id is the phone that carries it,
  * and every other device id bound to that key is a person that phone tracks.
  * Members whose key is their own are absent, so the map is exactly the Group's
- * Shadows. A later claim on a device id that another key already bound cannot
- * invent one, because the id's first claim still owns it.
+ * Shadows. A rejected claim cannot invent a holder, because the binding pass
+ * has already dropped it.
  */
 export function foldShadowHolders(entries: EntryEnvelope[]): Map<string, string> {
-  const bound = new Set<string>()
   const holderByKey = new Map<string, string>()
   const holders = new Map<string, string>()
 
-  for (const claim of memberClaims(entries)) {
-    if (bound.has(claim.deviceId)) {
-      continue
-    }
-
-    bound.add(claim.deviceId)
-
+  for (const claim of boundClaims(entries)) {
     const holder = holderByKey.get(claim.signerPublicKey)
 
     if (holder === undefined) {

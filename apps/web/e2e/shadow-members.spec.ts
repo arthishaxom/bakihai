@@ -103,6 +103,9 @@ test('archiving a person without the app keeps their Balance settleable', async 
   await expect.poll(() => memberNames(rohan)).toEqual(['Rohan'])
   await expect.poll(() => archivedMemberNames(rohan)).toEqual(['Rohit'])
 
+  // The Archived row keeps the "No phone" marker and the holder's name.
+  await expect(archivedMemberRow(rohan, 'Rohit')).toContainText('No phone · Added by you')
+
   // Pickers leave them out...
   const sheet = await openAddSheet(rohan)
 
@@ -149,6 +152,26 @@ test('adding a name the Group already uses warns softly and still adds', async (
   await expect
     .poll(async () => (await memberNames(rohan)).sort())
     .toEqual(['Rohan', 'Rohit', 'rohit'])
+
+  await rohanContext.close()
+})
+
+test('a name an archived Member uses still warns', async ({ browser }) => {
+  const rohanContext = await browser.newContext(PHONE)
+  const rohan = await rohanContext.newPage()
+  await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  await addShadowMember(rohan, 'Rohit')
+  await memberRow(rohan, 'Rohit').getByTestId('archive-member').click()
+  await expect.poll(() => archivedMemberNames(rohan)).toEqual(['Rohit'])
+
+  await rohan.getByTestId('add-shadow-member').click()
+
+  const sheet = rohan.getByRole('dialog')
+
+  await sheet.getByLabel('Name').fill('rohit')
+  await expect(sheet.getByTestId('duplicate-name-warning')).toContainText('already in this Group')
+  await sheet.getByRole('button', { name: 'Close' }).click()
 
   await rohanContext.close()
 })
