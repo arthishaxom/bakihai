@@ -14,7 +14,9 @@ import {
   loanEntryPayloadSchema,
   MEMBER_ENTRY_TYPE,
   type Member,
+  PAYMENT_ADDRESS_ENTRY_TYPE,
   RETURN_ENTRY_TYPE,
+  readPaymentAddressPayload,
   readSettlementConfirmPayload,
   readSettlementPayload,
   readVoidPayload,
@@ -105,6 +107,16 @@ export function describeEntry(
     return narrative.expense === undefined
       ? describeExpenseSplit(expense.data, members)
       : describeExpenseLine(narrative.expense, members)
+  }
+
+  // A Payment address Entry has no row of its own — the address lives on its
+  // Member's row — but a Void naming one still needs a readable line.
+  if (entry.type === PAYMENT_ADDRESS_ENTRY_TYPE) {
+    const address = readPaymentAddressPayload(entry)
+
+    return address === undefined
+      ? entry.type
+      : `${nameFor(members, entry.authorDeviceId)} set a payment address: ${address.upiId}`
   }
 
   return entry.type

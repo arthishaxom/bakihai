@@ -9,11 +9,13 @@ import {
   foldExpenses,
   foldLoans,
   foldMembers,
+  foldPaymentAddresses,
   foldSettlements,
   foldSettlementsAwaitingConfirmation,
   foldVoids,
   type LoanState,
   type Member,
+  type PaymentAddress,
   readEntries,
   type SettlementState,
   type SyncStatus,
@@ -26,6 +28,7 @@ import {
   getBookSession,
   type LoanDraft,
   type LoanSettleDraft,
+  type PaymentAddressDraft,
   type ReturnDraft,
   type SettlementConfirmDraft,
   type SettlementDraft,
@@ -51,6 +54,11 @@ export interface BookView {
   settlements: SettlementState[]
   /** The Settlements still waiting for their receiver's confirmation. */
   settlementsAwaitingConfirmation: SettlementState[]
+  /**
+   * Each Member's Payment address, folded from their latest Payment address
+   * Entry. A Member who set none simply has no entry here.
+   */
+  paymentAddresses: ReadonlyMap<string, PaymentAddress>
   /**
    * The Void Entries that Void something, keyed by the Voided Entry's id. A
    * Void naming a Member Entry or another Void is not here, so this map is
@@ -82,6 +90,8 @@ export interface BookView {
   writeSettlement(input: SettlementDraft): Promise<void>
   /** Signs and writes a Confirm of a Settlement to the local book. */
   writeSettlementConfirm(input: SettlementConfirmDraft): Promise<void>
+  /** Signs and writes this device's Payment address to the local book. */
+  writePaymentAddress(input: PaymentAddressDraft): Promise<void>
 }
 
 /** Reads the local book, re-rendering whenever it changes on this or another device. */
@@ -127,6 +137,7 @@ export function useBook(identity: Identity): BookView {
     () => foldSettlementsAwaitingConfirmation(entries),
     [entries],
   )
+  const paymentAddresses = useMemo(() => foldPaymentAddresses(entries), [entries])
   const voidsByTargetId = useMemo(() => foldVoids(entries), [entries])
 
   return {
@@ -137,6 +148,7 @@ export function useBook(identity: Identity): BookView {
     loans,
     settlements,
     settlementsAwaitingConfirmation,
+    paymentAddresses,
     voidsByTargetId,
     status,
     error,
@@ -148,6 +160,7 @@ export function useBook(identity: Identity): BookView {
     writeVoid: session.writeVoid,
     writeSettlement: session.writeSettlement,
     writeSettlementConfirm: session.writeSettlementConfirm,
+    writePaymentAddress: session.writePaymentAddress,
   }
 }
 

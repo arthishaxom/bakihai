@@ -101,6 +101,17 @@ export {
   memberEntryPayloadSchema,
 } from './group/members'
 export {
+  type CreatePaymentAddressEntryInput,
+  createPaymentAddressEntry,
+  foldPaymentAddresses,
+  PAYEE_NAME_MAX_LENGTH,
+  PAYMENT_ADDRESS_ENTRY_TYPE,
+  type PaymentAddress,
+  type PaymentAddressEntryPayload,
+  paymentAddressEntryPayloadSchema,
+  readPaymentAddressPayload,
+} from './group/payment-addresses'
+export {
   type CreateSettlementConfirmEntryInput,
   type CreateSettlementEntryInput,
   createSettlementConfirmEntry,
@@ -162,4 +173,5 @@ export {
   openBookUpdate,
   sealBookUpdate,
 } from './sync/update-crypto'
+export { buildUpiIntent, isUpiId, UPI_ID_MAX_LENGTH } from './upi'
 export { uuidv7 } from './uuidv7'

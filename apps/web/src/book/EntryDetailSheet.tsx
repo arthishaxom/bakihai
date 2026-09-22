@@ -1,4 +1,5 @@
 import {
+  buildUpiIntent,
   canVoidEntry,
   type EntryEnvelope,
   EXPENSE_ENTRY_TYPE,
@@ -8,6 +9,7 @@ import {
   type LoanReturn,
   type LoanState,
   type Member,
+  type PaymentAddress,
   parseQuantityToHundredths,
   parseRupeesToPaise,
   readVoidPayload,
@@ -15,6 +17,7 @@ import {
   VOID_ENTRY_TYPE,
   VOID_REASON_MAX_LENGTH,
 } from '@bakihai/shared'
+import { QRCodeSVG } from 'qrcode.react'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { AddSettlementForm } from './AddSettlementForm'
 import type {
@@ -75,6 +78,11 @@ interface EntryDetailSheetProps {
   tagTargetNarrative?: EntryNarrative | undefined
   /** The items a Settlement tag may name; none when nothing is open to tag. */
   tagOptions: SettlementTagOption[]
+  /**
+   * Each Member's Payment address. A Settlement's payer is offered Pay via UPI
+   * only when its receiver has one (ADR-0017).
+   */
+  paymentAddresses: ReadonlyMap<string, PaymentAddress>
   /** This device's Member identity, so only the receiver is offered a Confirm. */
   viewer: Pick<Member, 'deviceId' | 'displayName'>
   members: Member[]
@@ -104,7 +112,11 @@ interface EntryDetailSheetProps {
  * closing Return. An Expense shows what each participant still owes and lets
  * one share be settled directly, prefilled and tagged to the Expense. A Member
  * Entry or a Void offers no Void action (ADR-0014, #12), and an already-Voided
- * Entry offers none either, because a second Void would change nothing.
+ * Entry offers none either, because a second Void would change nothing. A live
+ * Settlement that no one has confirmed yet offers UPI payment — the payer a
+ * Pay via UPI link into their own app, either party the same intent as a QR —
+ * when its receiver has a Payment address and no money has been confirmed yet
+ * (ADR-0017).
  *
  * The sheet is a native `<dialog>` shown modally: the browser gives it the top
  * layer, a focus trap, and Escape to dismiss for free, and CSS pins it to the
@@ -123,6 +135,7 @@ export function EntryDetailSheet({
   tagTarget,
   tagTargetNarrative,
   tagOptions,
+  paymentAddresses,
   viewer,
   members,
   onReturn,
@@ -145,6 +158,7 @@ export function EntryDetailSheet({
   const [settlingShare, setSettlingShare] = useState<ExpenseCoverage | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [confirmError, setConfirmError] = useState<string | null>(null)
+  const [qrOpen, setQrOpen] = useState(false)
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -179,6 +193,34 @@ export function EntryDetailSheet({
       : tagTarget === undefined
         ? 'Tagged to an Entry that is not in this book.'
         : `Tagged to “${describeEntry(tagTarget, members, tagTargetNarrative)}”`
+  // A live Settlement that is not yet confirmed is the one with money left to
+  // move: its payer opens a UPI app with the receiver's address, amount, and
+  // note prefilled, and either side can show that same intent as a QR for an
+  // in-person scan. A receiver with no Payment address, and a Settlement the
+  // receiver already confirmed, offer neither — there is nothing left to pay.
+  const payeeAddress =
+    settlement === undefined ? undefined : paymentAddresses.get(settlement.toDeviceId)
+  const upiPayment =
+    settlement !== undefined &&
+    payeeAddress !== undefined &&
+    !settlement.confirmed &&
+    (settlement.fromDeviceId === viewer.deviceId || settlement.toDeviceId === viewer.deviceId)
+      ? {
+          settlement,
+          address: payeeAddress,
+          payer: settlement.fromDeviceId === viewer.deviceId,
+          intent: buildUpiIntent({
+            payeeUpiId: payeeAddress.upiId,
+            payeeName: payeeAddress.payeeName,
+            amountPaise: settlement.amountPaise,
+            ...(settlement.note === undefined ? {} : { note: settlement.note }),
+          }),
+          line:
+            settlement.fromDeviceId === viewer.deviceId
+              ? `Pay ${nameFor(members, settlement.toDeviceId)} ${formatRupees(settlement.amountPaise)} to ${payeeAddress.upiId}.`
+              : `Show the QR to be paid ${formatRupees(settlement.amountPaise)} at ${payeeAddress.upiId}.`,
+        }
+      : undefined
   // Optional properties cannot be handed over as undefined, so the narrative
   // is only given the parts this Entry actually has.
   const narrative: EntryNarrative = {
@@ -379,6 +421,44 @@ export function EntryDetailSheet({
           <p data-testid="settlement-tag" className="text-sm">
             {tagLine}
           </p>
+        ) : null}
+
+        {upiPayment ? (
+          <div
+            data-testid="upi-payment"
+            className="flex flex-col gap-3 border-foreground/10 border-t pt-4"
+          >
+            <p className="text-sm">{upiPayment.line}</p>
+            {upiPayment.payer ? (
+              <a
+                data-testid="pay-via-upi"
+                href={upiPayment.intent}
+                className={`${BUTTON_CLASSES} flex items-center justify-center bg-foreground text-background`}
+              >
+                Pay via UPI
+              </a>
+            ) : null}
+            <button
+              type="button"
+              data-testid="show-upi-qr"
+              aria-expanded={qrOpen}
+              onClick={() => setQrOpen((open) => !open)}
+              className={`${BUTTON_CLASSES} border border-foreground/20`}
+            >
+              {qrOpen ? 'Hide QR' : 'Show QR'}
+            </button>
+            {qrOpen ? (
+              <div data-testid="upi-qr" className="flex justify-center rounded-md bg-white p-4">
+                <QRCodeSVG
+                  value={upiPayment.intent}
+                  size={220}
+                  marginSize={4}
+                  level="M"
+                  title="UPI payment QR code"
+                />
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         {outstandingExpense ? (

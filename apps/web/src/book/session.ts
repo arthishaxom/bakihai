@@ -4,6 +4,7 @@ import {
   createExpenseEntry,
   createLoanEntry,
   createMemberEntry,
+  createPaymentAddressEntry,
   createReturnEntry,
   createSettlementConfirmEntry,
   createSettlementEntry,
@@ -77,6 +78,12 @@ export interface SettlementConfirmDraft {
   settlementEntryId: string
 }
 
+/** The fields the Payment address sheet decides; the session signs and writes it. */
+export interface PaymentAddressDraft {
+  upiId: string
+  payeeName: string
+}
+
 /** One Group's live book: the document, its local copy, and its relay connection. */
 export interface BookSession {
   doc: Y.Doc
@@ -101,6 +108,11 @@ export interface BookSession {
   writeSettlement(input: SettlementDraft): Promise<void>
   /** Signs and writes a Confirm of a Settlement to the local book. */
   writeSettlementConfirm(input: SettlementConfirmDraft): Promise<void>
+  /**
+   * Signs and writes this device's Payment address: where money sent to its
+   * Member should go. It syncs like any other Entry.
+   */
+  writePaymentAddress(input: PaymentAddressDraft): Promise<void>
 }
 
 let current: { groupId: string; session: BookSession } | null = null
@@ -243,6 +255,18 @@ function createBookSession(identity: Identity): BookSession {
         signerPublicKey: identity.signerPublicKey,
         privateKey,
         settlementEntryId: input.settlementEntryId,
+      })
+
+      putEntry(doc, entry)
+    },
+    async writePaymentAddress(input) {
+      const privateKey = await deviceKey()
+      const entry = await createPaymentAddressEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        upiId: input.upiId,
+        payeeName: input.payeeName,
       })
 
       putEntry(doc, entry)

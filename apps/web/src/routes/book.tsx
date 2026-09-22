@@ -4,6 +4,7 @@ import {
   type EntryEnvelope,
   LOAN_ENTRY_TYPE,
   MEMBER_ENTRY_TYPE,
+  PAYMENT_ADDRESS_ENTRY_TYPE,
   RETURN_ENTRY_TYPE,
   readReturnPayload,
   readSettlementConfirmPayload,
@@ -14,6 +15,7 @@ import {
 import { useMemo, useState } from 'react'
 import { AddEntrySheet } from '../book/AddEntrySheet'
 import { EntryDetailSheet } from '../book/EntryDetailSheet'
+import { PaymentAddressSheet } from '../book/PaymentAddressSheet'
 import { SettleUpSheet } from '../book/SettleUpSheet'
 import {
   describeBalance,
@@ -67,6 +69,7 @@ function BookScreen({ identity }: { identity: Identity }) {
     loans,
     settlements,
     settlementsAwaitingConfirmation,
+    paymentAddresses,
     voidsByTargetId,
     status,
     error,
@@ -78,19 +81,23 @@ function BookScreen({ identity }: { identity: Identity }) {
     writeVoid,
     writeSettlement,
     writeSettlementConfirm,
+    writePaymentAddress,
   } = useBook(identity)
   const inviteUrl = buildInviteUrl(window.location.origin, inviteForIdentity(identity))
   const [copied, setCopied] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [addressOpen, setAddressOpen] = useState(false)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [settlingBalance, setSettlingBalance] = useState<Balance | null>(null)
-  // useBook hands over only accepted Entries, so the ledger just leaves out
-  // the Member Entries that announce the roster itself and orders the rest
-  // newest first.
+  // useBook hands over only accepted Entries, so the ledger leaves out the
+  // Member Entries that announce the roster itself and the Payment address
+  // Entries that live on the Members rows, and orders the rest newest first.
   const ledgerEntries = useMemo(
     () =>
       entries
-        .filter((entry) => entry.type !== MEMBER_ENTRY_TYPE)
+        .filter(
+          (entry) => entry.type !== MEMBER_ENTRY_TYPE && entry.type !== PAYMENT_ADDRESS_ENTRY_TYPE,
+        )
         .sort(
           (left, right) =>
             compareTextDesc(left.occurredAt, right.occurredAt) ||
@@ -257,14 +264,45 @@ function BookScreen({ identity }: { identity: Identity }) {
           Members
         </h2>
         <ul data-testid="member-list" className="flex flex-col gap-1">
-          {members.map((member) => (
-            <li key={member.deviceId} data-member-name={member.displayName}>
-              {member.displayName}
-              {member.deviceId === identity.deviceId ? (
-                <span className="text-muted-foreground"> (you)</span>
-              ) : null}
-            </li>
-          ))}
+          {members.map((member) => {
+            const address = paymentAddresses.get(member.deviceId)
+
+            return (
+              <li
+                key={member.deviceId}
+                data-member-name={member.displayName}
+                className="flex min-h-11 items-center"
+              >
+                {member.deviceId === identity.deviceId ? (
+                  // Your own row opens the Payment address sheet; everyone
+                  // else's row just shows the address to pay them at.
+                  <button
+                    type="button"
+                    data-testid="own-member"
+                    onClick={() => setAddressOpen(true)}
+                    className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left"
+                  >
+                    <span>
+                      {member.displayName}
+                      <span className="text-muted-foreground"> (you)</span>
+                    </span>
+                    <span data-testid="member-upi" className="text-muted-foreground text-sm">
+                      {address ? address.upiId : 'Set UPI ID'}
+                    </span>
+                  </button>
+                ) : (
+                  <div className="flex min-h-11 w-full items-center justify-between gap-2 px-2 py-1.5">
+                    <span>{member.displayName}</span>
+                    {address ? (
+                      <span data-testid="member-upi" className="text-muted-foreground text-sm">
+                        {address.upiId}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+              </li>
+            )
+          })}
           {ready && members.length === 0 ? (
             <li className="text-muted-foreground">No members yet.</li>
           ) : null}
@@ -418,6 +456,15 @@ function BookScreen({ identity }: { identity: Identity }) {
         />
       ) : null}
 
+      {addressOpen ? (
+        <PaymentAddressSheet
+          address={paymentAddresses.get(identity.deviceId)}
+          viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
+          onSave={writePaymentAddress}
+          onClose={() => setAddressOpen(false)}
+        />
+      ) : null}
+
       {selectedEntry ? (
         <EntryDetailSheet
           entry={selectedEntry}
@@ -432,6 +479,7 @@ function BookScreen({ identity }: { identity: Identity }) {
           tagTarget={selectedNarrative?.tagTarget}
           tagTargetNarrative={selectedNarrative?.tagTargetNarrative}
           tagOptions={tagOptions}
+          paymentAddresses={paymentAddresses}
           viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
           members={members}
           onReturn={writeReturn}
