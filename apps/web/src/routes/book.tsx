@@ -8,6 +8,7 @@ import {
   readReturnPayload,
   readSettlementConfirmPayload,
   readVoidPayload,
+  SETTLEMENT_ENTRY_TYPE,
   type SyncStatus,
 } from '@bakihai/shared'
 import { useMemo, useState } from 'react'
@@ -18,9 +19,11 @@ import {
   describeBalance,
   describeEntry,
   describeSettlementStatus,
+  describeSettlementTags,
   describeVoidedBy,
   type EntryNarrative,
   formatOccurredAt,
+  settlementTagOf,
 } from '../book/summaries'
 import { useBook } from '../book/useBook'
 import { type Identity, inviteForIdentity, loadIdentity } from '../identity/identity'
@@ -60,6 +63,7 @@ function BookScreen({ identity }: { identity: Identity }) {
     entries,
     members,
     balances,
+    expenses,
     loans,
     settlements,
     settlementsAwaitingConfirmation,
@@ -70,6 +74,7 @@ function BookScreen({ identity }: { identity: Identity }) {
     writeExpense,
     writeLoan,
     writeReturn,
+    writeLoanSettle,
     writeVoid,
     writeSettlement,
     writeSettlementConfirm,
@@ -100,14 +105,25 @@ function BookScreen({ identity }: { identity: Identity }) {
     (balance) => memberIds.has(balance.debtorDeviceId) && memberIds.has(balance.creditorDeviceId),
   )
   const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
-  // What each row needs beyond its own Entry: the Loan a Loan or Return
-  // belongs to, and for a Void or Confirm the target's own narrative, so a Void
-  // of a Loan names the item and a Confirm names the Settlement it attests to
-  // rather than the type. A Voided Loan is no longer in the fold, so its line is
-  // read from its own Entry instead.
+  // The items a Settlement can be tagged to: everything still open, newest
+  // first. Settled items have nothing left to pay off (ADR-0004).
+  const tagOptions = useMemo(
+    () => describeSettlementTags(expenses, loans, members),
+    [expenses, loans, members],
+  )
+  // What each row needs beyond its own Entry: the Loan an Expense, Loan or
+  // Return belongs to with its computed state, and for a Void, Confirm, or
+  // tagged Settlement the target's own narrative, so a Void of a Loan names
+  // the item, a Confirm names the Settlement it attests to, and a tag names
+  // what it pays off rather than the type. A Voided item is no longer in the
+  // fold, so its line is read from its own Entry instead.
   const narratives = useMemo(() => {
     const byEntryId = new Map<string, EntryNarrative>()
     const liveLoans = new Map(loans.map((loan) => [loan.loanEntryId, loan]))
+    const liveExpenses = new Map(expenses.map((expense) => [expense.expenseEntryId, expense]))
+    const liveSettlements = new Map(
+      settlements.map((settlement) => [settlement.settlementEntryId, settlement]),
+    )
     const loanEntries = new Map(
       entries
         .filter((entry) => entry.type === LOAN_ENTRY_TYPE)
@@ -118,6 +134,10 @@ function BookScreen({ identity }: { identity: Identity }) {
       const live = liveLoans.get(entryId)
 
       byEntryId.set(entryId, live ? { loan: live } : { loanEntry: entry })
+    }
+
+    for (const [entryId, live] of liveExpenses) {
+      byEntryId.set(entryId, { expense: live })
     }
 
     for (const entry of entries) {
@@ -141,8 +161,21 @@ function BookScreen({ identity }: { identity: Identity }) {
       })
     }
 
-    for (const settlement of settlements) {
-      byEntryId.set(settlement.settlementEntryId, { settlement })
+    for (const entry of entries) {
+      if (entry.type !== SETTLEMENT_ENTRY_TYPE) {
+        continue
+      }
+
+      const live = liveSettlements.get(entry.id)
+      const tag = settlementTagOf(entry, live)
+      const tagTarget = tag === undefined ? undefined : entriesById.get(tag.entryId)
+      const tagTargetNarrative = tag === undefined ? undefined : byEntryId.get(tag.entryId)
+
+      byEntryId.set(entry.id, {
+        ...(live === undefined ? {} : { settlement: live }),
+        ...(tagTarget === undefined ? {} : { tagTarget }),
+        ...(tagTargetNarrative === undefined ? {} : { tagTargetNarrative }),
+      })
     }
 
     for (const entry of entries) {
@@ -180,7 +213,7 @@ function BookScreen({ identity }: { identity: Identity }) {
     }
 
     return byEntryId
-  }, [entries, entriesById, loans, settlements])
+  }, [entries, entriesById, expenses, loans, settlements])
   const selectedEntry = selectedEntryId === null ? undefined : entriesById.get(selectedEntryId)
   const selectedNarrative =
     selectedEntry === undefined ? undefined : narratives.get(selectedEntry.id)
@@ -366,6 +399,7 @@ function BookScreen({ identity }: { identity: Identity }) {
         <AddEntrySheet
           members={members}
           viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
+          tagOptions={tagOptions}
           onExpense={writeExpense}
           onLoan={writeLoan}
           onSettlement={writeSettlement}
@@ -378,6 +412,7 @@ function BookScreen({ identity }: { identity: Identity }) {
           balance={settlingBalance}
           members={members}
           viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
+          tagOptions={tagOptions}
           onSettle={writeSettlement}
           onClose={() => setSettlingBalance(null)}
         />
@@ -389,13 +424,19 @@ function BookScreen({ identity }: { identity: Identity }) {
           loan={selectedNarrative?.loan}
           returned={selectedNarrative?.returned}
           loanEntry={selectedNarrative?.loanEntry}
+          expense={selectedNarrative?.expense}
           voidTarget={selectedNarrative?.voidTarget}
           voidTargetNarrative={selectedNarrative?.voidTargetNarrative}
           voidedBy={selectedVoid}
           settlement={selectedNarrative?.settlement}
-          viewerDeviceId={identity.deviceId}
+          tagTarget={selectedNarrative?.tagTarget}
+          tagTargetNarrative={selectedNarrative?.tagTargetNarrative}
+          tagOptions={tagOptions}
+          viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
           members={members}
           onReturn={writeReturn}
+          onLoanSettle={writeLoanSettle}
+          onSettlement={writeSettlement}
           onVoid={writeVoid}
           onConfirm={writeSettlementConfirm}
           onClose={() => setSelectedEntryId(null)}

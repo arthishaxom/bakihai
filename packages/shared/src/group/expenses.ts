@@ -1,6 +1,9 @@
 import { z } from 'zod'
+import { compareText } from '../compare'
 import { ENTRY_SCHEMA_VERSION, type EntryEnvelope, signEntryEnvelope } from '../entry-envelope'
 import { uuidv7 } from '../uuidv7'
+import { foldSettlements, type SettlementState } from './settlements'
+import { foldVoids } from './voids'
 
 /** Entry type that records an Expense: one Member paid, others share the cost. */
 export const EXPENSE_ENTRY_TYPE = 'expense'
@@ -93,4 +96,134 @@ export async function createExpenseEntry(input: CreateExpenseEntryInput): Promis
     },
     input.privateKey,
   )
+}
+
+/**
+ * One participant's progress on an Expense: their share, and the tagged
+ * payments toward the payer that count against it. Only payments from this
+ * participant to the payer count, and only while both are live: a payment
+ * tagged to the Expense from anyone else — or in the other direction — moves
+ * the Balance without touching coverage (ADR-0004).
+ */
+export interface ExpenseCoverage {
+  deviceId: string
+  sharePaise: number
+  /** The live tagged Settlements from this participant to the payer, in Entry id order. */
+  settlements: SettlementState[]
+  /** What those Settlements amount to, exactly as paid; it may exceed the share. */
+  paidPaise: number
+  /** The paid part that counts against the share, never above it. */
+  coveredPaise: number
+  /** True when the tagged payments cover this participant's share. */
+  settled: boolean
+}
+
+/**
+ * An Expense folded from the whole book: its payer and shares, and per
+ * participant what tagged Settlements have covered of what they owe.
+ */
+export interface ExpenseState {
+  expenseEntryId: string
+  entry: EntryEnvelope
+  amountPaise: number
+  payerDeviceId: string
+  participantDeviceIds: string[]
+  /** Every participant's equal share, computed from the amount (ADR-0008). */
+  shares: ExpenseShare[]
+  /** One line per participant who owes the payer, in the shares' device-id order. */
+  coverage: ExpenseCoverage[]
+  /** What the participants who owe the payer owe together. */
+  owedPaise: number
+  /** The covered part of what they owe, never above owedPaise. */
+  coveredPaise: number
+  /** True when every participant who owes the payer is covered. */
+  settled: boolean
+}
+
+/**
+ * Folds the book's Expense Entries with the Settlements tagged to them into
+ * item states (ADR-0004, ADR-0016): each participant's share is their equal
+ * split, a live Settlement tagged to the Expense and paid by that participant
+ * to the payer covers up to their share, and the Expense reads Settled once
+ * every participant who owes the payer is covered. The payer's own share needs
+ * no coverage. Untagged Settlements, and Settlements tagged to something else
+ * or paid in the other direction, never change coverage; a claim covers from
+ * the moment it is appended, exactly as it counts toward the Balance
+ * (ADR-0007); Voiding a tagged Settlement reopens what it had covered, and a
+ * Voided Expense drops out with them (ADR-0005). A participant who overpays is
+ * covered, not credited: coverage is clamped at the share. The result is a
+ * pure function of the Entries — the same book folds the same coverage in any
+ * order, on any clock — and Entries this version cannot read are ignored
+ * rather than misread.
+ */
+export function foldExpenses(entries: EntryEnvelope[]): ExpenseState[] {
+  const voidedByTarget = foldVoids(entries)
+  const taggedSettlements = new Map<string, SettlementState[]>()
+
+  for (const settlement of foldSettlements(entries)) {
+    if (settlement.tag?.kind !== 'expense') {
+      continue
+    }
+
+    const tagged = taggedSettlements.get(settlement.tag.entryId) ?? []
+
+    tagged.push(settlement)
+    taggedSettlements.set(settlement.tag.entryId, tagged)
+  }
+
+  const expenses: ExpenseState[] = []
+
+  for (const entry of entries) {
+    if (entry.type !== EXPENSE_ENTRY_TYPE || voidedByTarget.has(entry.id)) {
+      continue
+    }
+
+    const payload = expenseEntryPayloadSchema.safeParse(entry.payload)
+
+    if (!payload.success) {
+      continue
+    }
+
+    const { amountPaise, payerDeviceId, participantDeviceIds } = payload.data
+    const shares = splitExpense(amountPaise, participantDeviceIds)
+    const coverage = shares
+      .filter((share) => share.deviceId !== payerDeviceId)
+      .map((share): ExpenseCoverage => {
+        const settlements = (taggedSettlements.get(entry.id) ?? []).filter(
+          (settlement) =>
+            settlement.fromDeviceId === share.deviceId && settlement.toDeviceId === payerDeviceId,
+        )
+        const paidPaise = settlements.reduce(
+          (total, settlement) => total + settlement.amountPaise,
+          0,
+        )
+        const coveredPaise = Math.min(paidPaise, share.amountPaise)
+
+        return {
+          deviceId: share.deviceId,
+          sharePaise: share.amountPaise,
+          settlements,
+          paidPaise,
+          coveredPaise,
+          settled: coveredPaise >= share.amountPaise,
+        }
+      })
+    const owedPaise = coverage.reduce((total, line) => total + line.sharePaise, 0)
+    const coveredPaise = coverage.reduce((total, line) => total + line.coveredPaise, 0)
+
+    expenses.push({
+      expenseEntryId: entry.id,
+      entry,
+      amountPaise,
+      payerDeviceId,
+      participantDeviceIds,
+      shares,
+      coverage,
+      owedPaise,
+      coveredPaise,
+      settled: coveredPaise >= owedPaise,
+    })
+  }
+
+  return expenses.sort((left, right) => compareText(left.expenseEntryId, right.expenseEntryId))
 }

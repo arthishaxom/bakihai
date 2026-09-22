@@ -52,9 +52,12 @@ export {
   type CreateExpenseEntryInput,
   createExpenseEntry,
   EXPENSE_ENTRY_TYPE,
+  type ExpenseCoverage,
   type ExpenseEntryPayload,
   type ExpenseShare,
+  type ExpenseState,
   expenseEntryPayloadSchema,
+  foldExpenses,
   splitExpense,
 } from './group/expenses'
 export {
@@ -112,8 +115,10 @@ export {
   type SettlementConfirmEntryPayload,
   type SettlementEntryPayload,
   type SettlementState,
+  type SettlementTag,
   settlementConfirmEntryPayloadSchema,
   settlementEntryPayloadSchema,
+  settlementTagSchema,
 } from './group/settlements'
 export {
   type CreateVoidEntryInput,

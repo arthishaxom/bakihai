@@ -3,8 +3,10 @@ import {
   type Balance,
   type BookSyncProvider,
   type EntryEnvelope,
+  type ExpenseState,
   entriesMap,
   foldBalances,
+  foldExpenses,
   foldLoans,
   foldMembers,
   foldSettlements,
@@ -23,6 +25,7 @@ import {
   type ExpenseDraft,
   getBookSession,
   type LoanDraft,
+  type LoanSettleDraft,
   type ReturnDraft,
   type SettlementConfirmDraft,
   type SettlementDraft,
@@ -40,6 +43,8 @@ export interface BookView {
   members: Member[]
   /** Pairwise Balances folded from the book's Expense Entries, zeroes already gone. */
   balances: Balance[]
+  /** Expense states folded from the book's Expense and tagged Settlement Entries. */
+  expenses: ExpenseState[]
   /** Item states folded from the book's Loan and Return Entries, in Entry id order. */
   loans: LoanState[]
   /** Settlement states folded from the book's Settlement and Confirm Entries. */
@@ -66,6 +71,11 @@ export interface BookView {
   writeLoan(input: LoanDraft): Promise<void>
   /** Signs and writes a Return to the local book. */
   writeReturn(input: ReturnDraft): Promise<void>
+  /**
+   * Signs and writes a Loan's closing Return and, when money changed hands,
+   * its tagged Settlement, in one action.
+   */
+  writeLoanSettle(input: LoanSettleDraft): Promise<void>
   /** Signs and writes a Void to the local book. */
   writeVoid(input: VoidDraft): Promise<void>
   /** Signs and writes a Settlement to the local book. */
@@ -110,6 +120,7 @@ export function useBook(identity: Identity): BookView {
   const entries = useMemo(() => admitEntries(verified.entries), [verified.entries])
   const members = useMemo(() => foldMembers(entries), [entries])
   const balances = useMemo(() => foldBalances(entries), [entries])
+  const expenses = useMemo(() => foldExpenses(entries), [entries])
   const loans = useMemo(() => foldLoans(entries), [entries])
   const settlements = useMemo(() => foldSettlements(entries), [entries])
   const settlementsAwaitingConfirmation = useMemo(
@@ -122,6 +133,7 @@ export function useBook(identity: Identity): BookView {
     entries,
     members,
     balances,
+    expenses,
     loans,
     settlements,
     settlementsAwaitingConfirmation,
@@ -132,6 +144,7 @@ export function useBook(identity: Identity): BookView {
     writeExpense: session.writeExpense,
     writeLoan: session.writeLoan,
     writeReturn: session.writeReturn,
+    writeLoanSettle: session.writeLoanSettle,
     writeVoid: session.writeVoid,
     writeSettlement: session.writeSettlement,
     writeSettlementConfirm: session.writeSettlementConfirm,

@@ -12,6 +12,7 @@ import {
   MEMBER_ENTRY_TYPE,
   putEntry,
   readEntries,
+  type SettlementTag,
   verifyEntryEnvelope,
 } from '@bakihai/shared'
 import type { IndexeddbPersistence } from 'y-indexeddb'
@@ -42,6 +43,18 @@ export interface ReturnDraft {
   quantityHundredths: number
 }
 
+/** The fields a Loan's Settle decides; the session signs and writes the closing Return and, when money moved, the tagged Settlement. */
+export interface LoanSettleDraft {
+  loanEntryId: string
+  quantityHundredths: number
+  /** The money that changed hands, written as a Settlement tagged to the Loan. */
+  settlement?: {
+    fromDeviceId: string
+    toDeviceId: string
+    amountPaise: number
+  }
+}
+
 /** The fields a detail sheet decides when correcting an Entry; the session signs and writes it. */
 export interface VoidDraft {
   targetEntryId: string
@@ -55,6 +68,8 @@ export interface SettlementDraft {
   amountPaise: number
   /** Optional free-text note, like "for dinner". */
   note?: string
+  /** Optional tag naming the Expense or Loan this payment pays off. */
+  tag?: SettlementTag
 }
 
 /** The fields a Settlement detail sheet decides when confirming; the session signs and writes it. */
@@ -75,6 +90,11 @@ export interface BookSession {
   writeLoan(input: LoanDraft): Promise<void>
   /** Signs and writes a Return to the local book; it syncs like any other Entry. */
   writeReturn(input: ReturnDraft): Promise<void>
+  /**
+   * Signs and writes a Loan's closing Return and, when money changed hands,
+   * its tagged Settlement, in one action; both sync like any other Entry.
+   */
+  writeLoanSettle(input: LoanSettleDraft): Promise<void>
   /** Signs and writes a Void to the local book; it syncs like any other Entry. */
   writeVoid(input: VoidDraft): Promise<void>
   /** Signs and writes a Settlement to the local book; it syncs like any other Entry. */
@@ -159,6 +179,36 @@ function createBookSession(identity: Identity): BookSession {
 
       putEntry(doc, entry)
     },
+    async writeLoanSettle(input) {
+      const privateKey = await deviceKey()
+      // Both Entries are signed before either is written, so a failure while
+      // building one leaves the book untouched rather than half-closed.
+      const returned = await createReturnEntry({
+        deviceId: identity.deviceId,
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        loanEntryId: input.loanEntryId,
+        quantityHundredths: input.quantityHundredths,
+      })
+      const settlement =
+        input.settlement === undefined
+          ? undefined
+          : await createSettlementEntry({
+              deviceId: identity.deviceId,
+              signerPublicKey: identity.signerPublicKey,
+              privateKey,
+              fromDeviceId: input.settlement.fromDeviceId,
+              toDeviceId: input.settlement.toDeviceId,
+              amountPaise: input.settlement.amountPaise,
+              tag: { kind: 'loan', entryId: input.loanEntryId },
+            })
+
+      putEntry(doc, returned)
+
+      if (settlement !== undefined) {
+        putEntry(doc, settlement)
+      }
+    },
     async writeVoid(input) {
       const privateKey = await deviceKey()
       const entry = await createVoidEntry({
@@ -181,6 +231,7 @@ function createBookSession(identity: Identity): BookSession {
         toDeviceId: input.toDeviceId,
         amountPaise: input.amountPaise,
         ...(input.note === undefined ? {} : { note: input.note }),
+        ...(input.tag === undefined ? {} : { tag: input.tag }),
       })
 
       putEntry(doc, entry)

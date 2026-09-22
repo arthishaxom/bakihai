@@ -10,6 +10,7 @@ import {
   readSettlementConfirmPayload,
   readSettlementPayload,
   type SettlementState,
+  type SettlementTag,
   settlementEntryPayloadSchema,
 } from '../src/group/settlements'
 import { createVoidEntry } from '../src/group/voids'
@@ -30,6 +31,7 @@ function pay(
     amountPaise: number
     fromDeviceId?: string
     note?: string
+    tag?: SettlementTag
     occurredAt?: string
   },
 ): Promise<Awaited<ReturnType<typeof createSettlementEntry>>> {
@@ -140,6 +142,52 @@ describe('createSettlementEntry', () => {
     await expect(write(mira.deviceId, 1.5)).rejects.toThrow()
     await expect(write(mira.deviceId, Number.NaN)).rejects.toThrow()
   })
+
+  it('carries an optional tag naming the Expense or Loan it pays off', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const dinner = await makeExpenseEntry(rohan, {
+      amountPaise: 90_000,
+      participantDeviceIds: [mira.deviceId],
+    })
+
+    const tagged = await pay(mira, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: 30_000,
+      tag: { kind: 'expense', entryId: dinner.id },
+    })
+
+    expect(tagged.payload).toEqual({
+      fromDeviceId: mira.deviceId,
+      toDeviceId: rohan.deviceId,
+      amountPaise: 30_000,
+      tag: { kind: 'expense', entryId: dinner.id },
+    })
+    expect(readSettlementPayload(tagged)?.tag).toEqual({ kind: 'expense', entryId: dinner.id })
+  })
+
+  it('leaves a missing tag out of the payload and refuses a tag this version cannot read', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const write = (tag: unknown) =>
+      createSettlementEntry({
+        deviceId: rohan.deviceId,
+        signerPublicKey: rohan.signerPublicKey,
+        privateKey: rohan.keyPair.privateKey,
+        fromDeviceId: rohan.deviceId,
+        toDeviceId: mira.deviceId,
+        amountPaise: 500,
+        ...(tag === undefined ? {} : { tag: tag as never }),
+      })
+
+    expect((await write(undefined)).payload).toEqual({
+      fromDeviceId: rohan.deviceId,
+      toDeviceId: mira.deviceId,
+      amountPaise: 500,
+    })
+    await expect(write({ kind: 'item', entryId: uuidv7() })).rejects.toThrow()
+    await expect(write({ kind: 'expense', entryId: 'not-an-entry-id' })).rejects.toThrow()
+  })
 })
 
 describe('createSettlementConfirmEntry', () => {
@@ -172,11 +220,21 @@ describe('createSettlementConfirmEntry', () => {
       type: 'settlement-confirm',
       payload: { settlement: dinner.id },
     })
+    const legacyTag = await makeEntry('legacy tag', {
+      type: 'settlement',
+      payload: {
+        fromDeviceId: rohan.deviceId,
+        toDeviceId: mira.deviceId,
+        amountPaise: 100,
+        tag: 'dinner',
+      },
+    })
 
     expect(readSettlementPayload(dinner)).toBeUndefined()
     expect(readSettlementPayload(legacySettlement)).toBeUndefined()
     expect(readSettlementConfirmPayload(dinner)).toBeUndefined()
     expect(readSettlementConfirmPayload(legacyConfirm)).toBeUndefined()
+    expect(readSettlementPayload(legacyTag)).toBeUndefined()
   })
 })
 
@@ -213,6 +271,25 @@ describe('foldSettlements', () => {
     expect(state.fromDeviceId).toBe(rohan.deviceId)
     expect(state.toDeviceId).toBe(mira.deviceId)
     expect(state.confirmed).toBe(true)
+  })
+
+  it('exposes the tag naming the Expense or Loan the Settlement pays off', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const dinner = await makeExpenseEntry(rohan, {
+      amountPaise: 90_000,
+      participantDeviceIds: [mira.deviceId],
+    })
+    const tagged = await pay(mira, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: 30_000,
+      tag: { kind: 'expense', entryId: dinner.id },
+    })
+
+    expect(onlySettlement([tagged]).tag).toEqual({ kind: 'expense', entryId: dinner.id })
+    // The tagging participant paid the other Member, so it is a claim like any
+    // payer-written Settlement; coverage never waits on a Confirm (ADR-0007).
+    expect(onlySettlement([tagged]).confirmed).toBe(false)
   })
 
   it('marks a payer-written Settlement confirmed once its receiver writes a Confirm', async () => {

@@ -32,6 +32,10 @@ _Avoid_: repayment, give-back
 An Entry recording a real-world payment from one member to another, optionally attached to the Expense or Loan it settles.
 _Avoid_: payment, transfer, transaction
 
+**Tag**:
+The optional reference a Settlement carries to the Expense or Loan it pays off. It powers item coverage and never changes the Balance arithmetic.
+_Avoid_: link, label, category
+
 **Confirm**:
 An Entry where a Settlement's receiver attests to a payment they did not record themselves.
 _Avoid_: approve, accept
@@ -44,8 +48,12 @@ _Avoid_: bank details, account
 The net position between two members, computed from all Entries. Never stored.
 _Avoid_: dues, debt, outstanding
 
+**Coverage**:
+The part of an Expense's shares that tagged payments to the payer have covered; computed, never stored.
+_Avoid_: progress, repayment
+
 **Settled**:
-An Expense or Loan whose cost is fully covered; a state computed from Entries, never stored.
+An Expense whose every owed share tagged payments cover, or a Loan with nothing left outstanding; a state computed from Entries, never stored.
 _Avoid_: closed, completed, done
 
 **Over-returned**:

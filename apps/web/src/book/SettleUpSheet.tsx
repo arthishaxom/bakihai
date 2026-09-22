@@ -2,25 +2,30 @@ import type { Balance, Member } from '@bakihai/shared'
 import { useEffect, useRef } from 'react'
 import { AddSettlementForm } from './AddSettlementForm'
 import type { SettlementDraft } from './session'
-import { describeBalance, type NamedMember, nameFor } from './summaries'
+import { describeBalance, type NamedMember, nameFor, type SettlementTagOption } from './summaries'
 
 /**
  * The Settle up bottom sheet, opened from a Balance row. It prefills the
  * Settlement with the pairwise net, owing side to owed side, and leaves the
- * amount editable so a partial payment is normal. Whoever taps it authors the
- * Settlement: the debtor's record is a claim the creditor confirms, while the
- * creditor's own record is confirmed from the start (ADR-0015).
+ * amount editable so a partial payment is normal. The tag picker is open too,
+ * so the payment can be attached to the Expense or Loan it pays off. Whoever
+ * taps it authors the Settlement: the debtor's record is a claim the creditor
+ * confirms, while the creditor's own record is confirmed from the start
+ * (ADR-0015).
  */
 export function SettleUpSheet({
   balance,
   members,
   viewer,
+  tagOptions,
   onSettle,
   onClose,
 }: {
   balance: Balance
   members: Member[]
   viewer: NamedMember
+  /** The items a tag may name; none when nothing is open to tag. */
+  tagOptions?: SettlementTagOption[] | undefined
   onSettle: (input: SettlementDraft) => Promise<void>
   onClose: () => void
 }) {
@@ -85,6 +90,7 @@ export function SettleUpSheet({
             toDeviceId: balance.creditorDeviceId,
             amountPaise: balance.amountPaise,
           }}
+          tagOptions={tagOptions}
           onSubmit={handleSettle}
         />
       </div>

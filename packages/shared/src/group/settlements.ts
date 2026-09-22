@@ -14,11 +14,25 @@ export const SETTLEMENT_CONFIRM_ENTRY_TYPE = 'settlement-confirm'
 export const SETTLEMENT_NOTE_MAX_LENGTH = 200
 
 /**
+ * The tag a Settlement may carry: the Expense or Loan it pays off. The kind
+ * keeps the reference readable on its own, and the Entry id is a uuidv7 like
+ * every other reference in the book. The tag powers an item's computed
+ * coverage and Settled state, and never changes the Balance arithmetic
+ * (ADR-0004).
+ */
+export const settlementTagSchema = z.strictObject({
+  kind: z.enum(['expense', 'loan']),
+  entryId: z.uuidv7(),
+})
+
+export type SettlementTag = z.infer<typeof settlementTagSchema>
+
+/**
  * The payload of a Settlement Entry: who paid whom, and how much. The amount is
  * stored exactly like paise (ADR-0008), the note is free text, and either side
  * may author it — the payer claims "I paid", the receiver records "they paid
  * me" (ADR-0007). A Settlement the receiver authored starts confirmed
- * (ADR-0015).
+ * (ADR-0015). An optional tag names the Expense or Loan this payment pays off.
  */
 export const settlementEntryPayloadSchema = z
   .strictObject({
@@ -26,6 +40,7 @@ export const settlementEntryPayloadSchema = z
     toDeviceId: z.string().min(1),
     amountPaise: z.int().positive(),
     note: z.string().trim().min(1).max(SETTLEMENT_NOTE_MAX_LENGTH).optional(),
+    tag: settlementTagSchema.optional(),
   })
   .refine((payload) => payload.fromDeviceId !== payload.toDeviceId, {
     message: 'a Settlement cannot be from a Member to themselves',
@@ -80,6 +95,8 @@ export interface CreateSettlementEntryInput {
   amountPaise: number
   /** Optional free-text note, kept as written minus surrounding whitespace. */
   note?: string
+  /** Optional tag naming the Expense or Loan this payment pays off. */
+  tag?: SettlementTag
   /** Device clock; display ordering only. Defaults to now. */
   occurredAt?: string
 }
@@ -87,23 +104,28 @@ export interface CreateSettlementEntryInput {
 /**
  * Writes this device's Settlement Entry: a signed record of money that moved
  * between two Members. Either side may author it (ADR-0007), and a Settlement
- * the receiver authored is confirmed by its own authorship (ADR-0015).
+ * the receiver authored is confirmed by its own authorship (ADR-0015). A tag,
+ * when one is given, names the Expense or Loan the payment pays off.
  */
 export async function createSettlementEntry(
   input: CreateSettlementEntryInput,
 ): Promise<EntryEnvelope> {
-  const { fromDeviceId, toDeviceId, amountPaise, note } = settlementEntryPayloadSchema.parse({
+  const { fromDeviceId, toDeviceId, amountPaise, note, tag } = settlementEntryPayloadSchema.parse({
     fromDeviceId: input.fromDeviceId,
     toDeviceId: input.toDeviceId,
     amountPaise: input.amountPaise,
     ...(input.note?.trim() ? { note: input.note } : {}),
+    ...(input.tag === undefined ? {} : { tag: input.tag }),
   })
-  // A missing note is left out of the JSON entirely rather than written as
+  // Missing fields are left out of the JSON entirely rather than written as
   // undefined, which the canonical-JSON envelope cannot hold.
-  const payload =
-    note === undefined
-      ? { fromDeviceId, toDeviceId, amountPaise }
-      : { fromDeviceId, toDeviceId, amountPaise, note }
+  const payload = {
+    fromDeviceId,
+    toDeviceId,
+    amountPaise,
+    ...(note === undefined ? {} : { note }),
+    ...(tag === undefined ? {} : { tag }),
+  }
 
   return signEntryEnvelope(
     {
@@ -169,6 +191,8 @@ export interface SettlementState {
   toDeviceId: string
   amountPaise: number
   note?: string
+  /** The Expense or Loan this Settlement pays off, when it carries a tag. */
+  tag?: SettlementTag
   /** The receiver's Confirm Entry, when one attests to this Settlement. */
   confirmation?: EntryEnvelope
   /** True when the receiver authored the Settlement or confirmed a claim. */
@@ -242,6 +266,7 @@ export function foldSettlements(entries: EntryEnvelope[]): SettlementState[] {
         toDeviceId: payload.toDeviceId,
         amountPaise: payload.amountPaise,
         ...(payload.note === undefined ? {} : { note: payload.note }),
+        ...(payload.tag === undefined ? {} : { tag: payload.tag }),
         ...(confirmation === undefined ? {} : { confirmation }),
         confirmed: receiverAuthored || confirmation !== undefined,
       }

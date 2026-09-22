@@ -2,10 +2,11 @@ import {
   formatPaiseAsRupees,
   parseRupeesToPaise,
   SETTLEMENT_NOTE_MAX_LENGTH,
+  type SettlementTag,
 } from '@bakihai/shared'
 import { type FormEvent, useState } from 'react'
 import type { SettlementDraft } from './session'
-import { describeSettlementLine, type NamedMember } from './summaries'
+import { describeSettlementLine, type NamedMember, type SettlementTagOption } from './summaries'
 
 const INPUT_CLASSES =
   'min-h-11 rounded-md border border-foreground/20 bg-transparent px-3 py-2 text-base'
@@ -25,25 +26,37 @@ export interface SettlementPreset {
   amountPaise: number
 }
 
+/** The value a tag takes in the picker: its kind and Entry id, unambiguous. */
+function tagKeyOf(tag: SettlementTag): string {
+  return `${tag.kind}:${tag.entryId}`
+}
+
 /**
- * The Settlement form: who paid whom, how much, and an optional note. A payer
- * claims "I paid"; a receiver records "they paid me" — the receiver's own
- * authorship is what makes a Settlement confirmed from the start (ADR-0015).
- * The form always writes an untagged Settlement, so it says on screen that the
- * Settlement moves the Balance and nothing else (ADR-0004). Settle up locks the
- * direction and counterparty to a Balance's pair and prefills its net, leaving
- * the amount editable for a partial payment.
+ * The Settlement form: who paid whom, how much, and an optional note and tag.
+ * A payer claims "I paid"; a receiver records "they paid me" — the receiver's
+ * own authorship is what makes a Settlement confirmed from the start
+ * (ADR-0015). An optional tag names the Expense or Loan the payment pays off,
+ * defaulted when the form is opened from an item; without one, the Settlement
+ * moves only the Balance (ADR-0004). Settle up locks the direction and
+ * counterparty to a Balance's pair and prefills its net, leaving the amount
+ * editable for a partial payment.
  */
 export function AddSettlementForm({
   members,
   viewer,
   preset,
+  tagOptions,
+  initialTag,
   onSubmit,
 }: {
   members: NamedMember[]
   viewer: NamedMember
   /** Set by Settle up: the pair and the pairwise net, prefilled and locked. */
   preset?: SettlementPreset | undefined
+  /** The items the tag picker offers; none when nothing is open to tag. */
+  tagOptions?: SettlementTagOption[] | undefined
+  /** The tag the picker starts on, when the form was opened from an item. */
+  initialTag?: SettlementTag | undefined
   onSubmit: (input: SettlementDraft) => Promise<void>
 }) {
   const [direction, setDirection] = useState<Direction>('paid')
@@ -52,6 +65,7 @@ export function AddSettlementForm({
     preset === undefined ? '' : formatPaiseAsRupees(preset.amountPaise),
   )
   const [note, setNote] = useState('')
+  const [tagKey, setTagKey] = useState(() => (initialTag === undefined ? '' : tagKeyOf(initialTag)))
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -77,6 +91,15 @@ export function AddSettlementForm({
       : direction === 'paid'
         ? (counterparty?.deviceId ?? '')
         : viewer.deviceId
+  // Only items this exact pair could cover are offered: a tag whose item is not
+  // owed by the payer to the receiver would promise coverage the fold never
+  // grants (ADR-0016). A tag the pair no longer covers is left off the write.
+  const options = (tagOptions ?? []).filter(
+    (option) =>
+      option.owedByDeviceIds.includes(fromDeviceId) && option.creditorDeviceId === toDeviceId,
+  )
+  const selectedTag = options.find((option) => tagKeyOf(option.tag) === tagKey)
+
   const amountPaise = parseRupeesToPaise(amount)
   const validAmount = amountPaise !== null && amountPaise > 0
   const pairReady = preset !== undefined || counterparty !== undefined
@@ -103,6 +126,7 @@ export function AddSettlementForm({
         toDeviceId,
         amountPaise,
         ...(note.trim() ? { note } : {}),
+        ...(selectedTag === undefined ? {} : { tag: selectedTag.tag }),
       })
       setAmount(preset === undefined ? '' : formatPaiseAsRupees(preset.amountPaise))
       setNote('')
@@ -175,6 +199,26 @@ export function AddSettlementForm({
         />
       </label>
 
+      {options.length > 0 ? (
+        <label className="flex flex-col gap-1 text-sm">
+          Tag (optional)
+          <select
+            name="tag"
+            data-testid="settlement-tag"
+            value={tagKey}
+            onChange={(event) => setTagKey(event.target.value)}
+            className={INPUT_CLASSES}
+          >
+            <option value="">None — moves only the Balance</option>
+            {options.map((option) => (
+              <option key={tagKeyOf(option.tag)} value={tagKeyOf(option.tag)}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
       <label className="flex flex-col gap-1 text-sm">
         Note (optional)
         <input
@@ -200,9 +244,15 @@ export function AddSettlementForm({
         </p>
       ) : null}
 
-      <p data-testid="settlement-untagged-notice" className="text-muted-foreground text-sm">
-        Not attached to an Expense or Loan — this Settlement only moves the Balance.
-      </p>
+      {selectedTag === undefined ? (
+        <p data-testid="settlement-untagged-notice" className="text-muted-foreground text-sm">
+          Not attached to an Expense or Loan — this Settlement only moves the Balance.
+        </p>
+      ) : (
+        <p data-testid="settlement-tag-notice" className="text-muted-foreground text-sm">
+          Tagged to {selectedTag.label} — this Settlement counts toward that item&apos;s coverage.
+        </p>
+      )}
 
       {error ? (
         <p role="alert" className="text-red-600 text-sm">

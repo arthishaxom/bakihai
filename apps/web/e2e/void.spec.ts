@@ -45,8 +45,9 @@ test('an Expense is Voided from its bottom sheet and the Balance clears on both 
   await addExpense(rohan, '900')
   await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohan ₹450'])
 
-  // The row opens a bottom sheet: anchored to the bottom of the phone
-  // viewport, with every action a thumb-sized target.
+  // The row opens a bottom sheet: pinned to the bottom of the phone viewport
+  // (its content scrolls under the sheet's height cap), with every action a
+  // thumb-sized target.
   const sheet = await openEntrySheet(rohan, entryRow(rohan, 'expense'))
 
   await expect(sheet).toContainText('Rohan paid ₹900')
@@ -57,7 +58,9 @@ test('an Expense is Voided from its bottom sheet and the Balance clears on both 
 
   expect(panelBox).not.toBeNull()
   expect((panelBox?.y ?? 0) + (panelBox?.height ?? 0)).toBeGreaterThanOrEqual(PHONE_HEIGHT - 2)
-  expect(panelBox?.y ?? 0).toBeGreaterThan(PHONE_HEIGHT / 2)
+  // Anchored to the bottom and capped below the full viewport, so its content
+  // scrolls rather than swallowing the screen.
+  expect(panelBox?.height ?? PHONE_HEIGHT).toBeLessThanOrEqual(PHONE_HEIGHT * 0.85 + 1)
 
   for (const button of await sheet.getByRole('button').all()) {
     const box = await button.boundingBox()

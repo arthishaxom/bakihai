@@ -3,7 +3,7 @@ import { AddExpenseForm } from './AddExpenseForm'
 import { AddLoanForm } from './AddLoanForm'
 import { AddSettlementForm } from './AddSettlementForm'
 import type { ExpenseDraft, LoanDraft, SettlementDraft } from './session'
-import type { NamedMember } from './summaries'
+import type { NamedMember, SettlementTagOption } from './summaries'
 
 type AddMode = 'expense' | 'loan' | 'settlement'
 
@@ -18,6 +18,7 @@ type AddMode = 'expense' | 'loan' | 'settlement'
 export function AddEntrySheet({
   members,
   viewer,
+  tagOptions,
   onExpense,
   onLoan,
   onSettlement,
@@ -25,6 +26,8 @@ export function AddEntrySheet({
 }: {
   members: NamedMember[]
   viewer: NamedMember
+  /** The items a Settlement tag may name; none when nothing is open to tag. */
+  tagOptions: SettlementTagOption[]
   onExpense: (input: ExpenseDraft) => Promise<void>
   onLoan: (input: LoanDraft) => Promise<void>
   onSettlement: (input: SettlementDraft) => Promise<void>
@@ -119,7 +122,12 @@ export function AddEntrySheet({
         ) : mode === 'loan' ? (
           <AddLoanForm members={members} viewer={viewer} onSubmit={handleLoan} />
         ) : (
-          <AddSettlementForm members={members} viewer={viewer} onSubmit={handleSettlement} />
+          <AddSettlementForm
+            members={members}
+            viewer={viewer}
+            tagOptions={tagOptions}
+            onSubmit={handleSettlement}
+          />
         )}
       </div>
     </dialog>

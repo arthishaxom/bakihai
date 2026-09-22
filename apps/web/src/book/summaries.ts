@@ -2,7 +2,9 @@ import {
   type Balance,
   type EntryEnvelope,
   EXPENSE_ENTRY_TYPE,
+  type ExpenseCoverage,
   type ExpenseShare,
+  type ExpenseState,
   expenseEntryPayloadSchema,
   formatHundredthsAsQuantity,
   formatPaiseAsRupees,
@@ -14,11 +16,13 @@ import {
   type Member,
   RETURN_ENTRY_TYPE,
   readSettlementConfirmPayload,
+  readSettlementPayload,
   readVoidPayload,
   SETTLEMENT_CONFIRM_ENTRY_TYPE,
   SETTLEMENT_ENTRY_TYPE,
   type SettlementEntryPayload,
   type SettlementState,
+  type SettlementTag,
   settlementEntryPayloadSchema,
   VOID_ENTRY_TYPE,
 } from '@bakihai/shared'
@@ -98,13 +102,70 @@ export function describeEntry(
   const expense = expenseEntryPayloadSchema.safeParse(entry.payload)
 
   if (entry.type === EXPENSE_ENTRY_TYPE && expense.success) {
-    const payer = nameFor(members, expense.data.payerDeviceId)
-    const sharers = expense.data.participantDeviceIds.map((deviceId) => nameFor(members, deviceId))
-
-    return `${payer} paid ${formatRupees(expense.data.amountPaise)} · split between ${sharers.join(', ')}`
+    return narrative.expense === undefined
+      ? describeExpenseSplit(expense.data, members)
+      : describeExpenseLine(narrative.expense, members)
   }
 
   return entry.type
+}
+
+/**
+ * What an Expense's split reads as without its coverage: who paid what and who
+ * shares. This is all a Voided Expense's struck-through line can say, because
+ * the fold no longer holds its state.
+ */
+export function describeExpenseSplit(
+  expense: {
+    amountPaise: number
+    payerDeviceId: string
+    participantDeviceIds: string[]
+  },
+  members: NamedMember[],
+): string {
+  const payer = nameFor(members, expense.payerDeviceId)
+  const sharers = expense.participantDeviceIds.map((deviceId) => nameFor(members, deviceId))
+
+  return `${payer} paid ${formatRupees(expense.amountPaise)} · split between ${sharers.join(', ')}`
+}
+
+/**
+ * What an Expense with its coverage reads as in the book: the split, plus how
+ * much of what the others owe tagged Settlements have covered. No coverage
+ * reads without a suffix; partial coverage names the paid-of-total progress; a
+ * fully covered Expense reads Settled.
+ */
+export function describeExpenseLine(state: ExpenseState, members: NamedMember[]): string {
+  const line = describeExpenseSplit(state, members)
+
+  if (state.settled) {
+    return `${line} · Settled`
+  }
+
+  if (state.coveredPaise > 0) {
+    return `${line} · ${formatRupees(state.coveredPaise)} of ${formatRupees(state.owedPaise)} repaid`
+  }
+
+  return line
+}
+
+/**
+ * One participant's coverage, read from what they owe the payer: a partial
+ * payment shows the paid-of-total progress, a covered share reads Settled, and
+ * nothing paid reads as what they owe.
+ */
+export function describeExpenseCoverage(coverage: ExpenseCoverage, members: NamedMember[]): string {
+  const name = nameFor(members, coverage.deviceId)
+
+  if (coverage.settled) {
+    return `${name} Settled`
+  }
+
+  if (coverage.coveredPaise > 0) {
+    return `${name} repaid ${formatRupees(coverage.coveredPaise)} of ${formatRupees(coverage.sharePaise)}`
+  }
+
+  return `${name} owes ${formatRupees(coverage.sharePaise)}`
 }
 
 /**
@@ -120,6 +181,8 @@ export interface EntryNarrative {
   loan?: LoanState
   /** The Return this Entry is, when it is a Return. */
   returned?: LoanReturn
+  /** The Expense this Entry is, when the fold still holds it. */
+  expense?: ExpenseState
   /**
    * The Settlement this Entry is, when the fold still holds it. A Voided
    * Settlement is read from its own payload instead.
@@ -129,6 +192,10 @@ export interface EntryNarrative {
   confirmTarget?: EntryEnvelope
   /** What that Settlement itself reads as, so a Confirm names the Settlement. */
   confirmTargetNarrative?: EntryNarrative
+  /** The Expense or Loan a Settlement's tag names, when it is in this book. */
+  tagTarget?: EntryEnvelope
+  /** What that tagged Entry reads as, so a Settlement names what it pays off. */
+  tagTargetNarrative?: EntryNarrative
   /**
    * The Loan Entry itself, for lines the fold no longer holds: a Voided Loan
    * still names its item on its own struck-through line.
@@ -293,6 +360,63 @@ export function describeSettlementStatus(settlement: SettlementState, members: M
   const receiver = nameFor(members, settlement.toDeviceId)
 
   return settlement.confirmed ? `Confirmed by ${receiver}` : `Waiting for ${receiver} to confirm`
+}
+
+/** A choice in the Settlement form's tag picker: the tag, how it reads, and who could cover it. */
+export interface SettlementTagOption {
+  tag: SettlementTag
+  label: string
+  /** The Members who owe on this item; only their payments to the creditor cover it (ADR-0016). */
+  owedByDeviceIds: string[]
+  /** The Member a covering payment goes to: the Expense's payer or the Loan's lender. */
+  creditorDeviceId: string
+}
+
+/**
+ * The items a Settlement may be tagged to, newest first: every Expense not yet
+ * fully covered and every Loan with something outstanding. Each option names
+ * who could cover it, so the form only offers a tag the payment's pair can
+ * actually cover (ADR-0016). A settled item has nothing left to pay off, and
+ * an item the fold has dropped — Voided, or with a payload this version cannot
+ * read — is not offered.
+ */
+export function describeSettlementTags(
+  expenses: ExpenseState[],
+  loans: LoanState[],
+  members: Member[],
+): SettlementTagOption[] {
+  const options: SettlementTagOption[] = [
+    ...expenses
+      .filter((expense) => !expense.settled)
+      .map((expense) => ({
+        tag: { kind: 'expense', entryId: expense.expenseEntryId } as const,
+        label: describeExpenseLine(expense, members),
+        owedByDeviceIds: expense.coverage
+          .filter((line) => !line.settled)
+          .map((line) => line.deviceId),
+        creditorDeviceId: expense.payerDeviceId,
+      })),
+    ...loans
+      .filter((loan) => !loan.settled)
+      .map((loan) => ({
+        tag: { kind: 'loan', entryId: loan.loanEntryId } as const,
+        label: describeLoan(loan, members),
+        owedByDeviceIds: [loan.borrowerDeviceId],
+        creditorDeviceId: loan.lenderDeviceId,
+      })),
+  ]
+
+  return options.sort((left, right) =>
+    left.tag.entryId < right.tag.entryId ? 1 : left.tag.entryId > right.tag.entryId ? -1 : 0,
+  )
+}
+
+/** The tag of a Settlement, read from the fold or, for a Voided one, its payload. */
+export function settlementTagOf(
+  entry: EntryEnvelope,
+  settlement: SettlementState | undefined,
+): SettlementTag | undefined {
+  return settlement?.tag ?? readSettlementPayload(entry)?.tag
 }
 
 /**
