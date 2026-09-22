@@ -256,7 +256,7 @@ describe('admitEntries', () => {
     expect(foldBalances(admitEntries(entries))).toEqual([])
   })
 
-  it('drops everything a forger writes as a person with no phone they tried to rebind', async () => {
+  it('drops everything a forger writes as a Shadow Member they tried to rebind', async () => {
     const rohan = await makeDevice()
     const mallory = await makeDevice()
     const rohitId = uuidv7()

@@ -106,7 +106,7 @@ describe('book document', () => {
     expect(updates).toHaveLength(0)
   })
 
-  it("writing a person with no phone's Member Entry twice changes nothing", async () => {
+  it('writing a Shadow Member Entry twice changes nothing', async () => {
     const doc = createBookDoc()
     const rohan = await makeDevice()
     const entry = await createMemberEntry({

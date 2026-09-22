@@ -99,6 +99,9 @@ export async function openAddSheet(page: Page): Promise<Locator> {
 
 /** Adds a person without the app from the Members list and waits for their row. */
 export async function addShadowMember(page: Page, displayName: string): Promise<void> {
+  const rows = page.getByTestId('member-list').locator('li')
+  const before = await rows.count()
+
   await page.getByTestId('add-shadow-member').click()
 
   const sheet = page.getByRole('dialog')
@@ -107,6 +110,9 @@ export async function addShadowMember(page: Page, displayName: string): Promise<
   await sheet.getByLabel('Name').fill(displayName)
   await sheet.getByRole('button', { name: 'Add person' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  // The list grows by exactly one row, so re-adding an existing name still
+  // waits for the new person rather than matching the old one.
+  await expect(rows).toHaveCount(before + 1)
   await expect.poll(() => memberNames(page)).toContain(displayName)
 }
 

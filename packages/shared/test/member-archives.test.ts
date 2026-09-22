@@ -208,7 +208,7 @@ describe('Archived Members and the rest of the book', () => {
     expect(foldMemberArchives(admitted).get(mira.deviceId)).toBe(marker)
   })
 
-  it("keeps a person with no phone folding and archivable after its holder's key is gone", async () => {
+  it("keeps a Shadow Member folding and archivable after its holder's key is gone", async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
     const rejoined = await makeDevice()
@@ -226,7 +226,7 @@ describe('Archived Members and the rest of the book', () => {
       amountPaise: 90_000,
       participantDeviceIds: [rohitId],
     })
-    const partial = await createSettlementEntry({
+    const miraPaysRohit = await createSettlementEntry({
       deviceId: mira.deviceId,
       signerPublicKey: mira.signerPublicKey,
       privateKey: mira.keyPair.privateKey,
@@ -235,7 +235,7 @@ describe('Archived Members and the rest of the book', () => {
       amountPaise: 30_000,
     })
     const marker = await archive(mira, rohitId)
-    const entries = [...roster, dinner, partial]
+    const entries = [...roster, dinner, miraPaysRohit]
 
     expect(foldMembers(entries).map((member) => member.displayName)).toContain('Rohit')
     expect(foldShadowHolders(entries).get(rohitId)).toBe(rohan.deviceId)

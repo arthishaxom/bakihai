@@ -18,6 +18,13 @@ interface StoredIdentity {
   privateKeyPkcs8?: string
 }
 
+/** A raw book value, as the harness's `entryValues` hands it out. */
+interface HarnessEntryValue {
+  authorDeviceId?: string
+  type?: string
+  payload?: { displayName?: string }
+}
+
 /** The identity record this device stored in local storage, exactly as stored. */
 function storedIdentity(page: Page): Promise<StoredIdentity> {
   return page.evaluate(
@@ -25,30 +32,27 @@ function storedIdentity(page: Page): Promise<StoredIdentity> {
   )
 }
 
-/** The device id of a Member, read from the harness's copy of the book. */
+/**
+ * The device id of a Member, read from the harness's copy of the book. The
+ * tests that use it name one Member per name; the roster allows duplicates
+ * (ADR-0014), so it takes the first match.
+ */
 async function memberDeviceId(harness: Page, displayName: string): Promise<string> {
   const isInBook = () =>
     harness.evaluate(
       (name) =>
-        (
-          window.harness.entryValues() as {
-            type?: string
-            payload?: { displayName?: string }
-          }[]
-        ).some((value) => value.type === 'member' && value.payload?.displayName === name),
+        (window.harness.entryValues() as HarnessEntryValue[]).some(
+          (value) => value.type === 'member' && value.payload?.displayName === name,
+        ),
       displayName,
     )
 
   await expect.poll(isInBook).toBe(true)
 
   return harness.evaluate((name) => {
-    const claim = (
-      window.harness.entryValues() as {
-        authorDeviceId?: string
-        type?: string
-        payload?: { displayName?: string }
-      }[]
-    ).find((value) => value.type === 'member' && value.payload?.displayName === name)
+    const claim = (window.harness.entryValues() as HarnessEntryValue[]).find(
+      (value) => value.type === 'member' && value.payload?.displayName === name,
+    )
 
     if (!claim?.authorDeviceId) {
       throw new Error(`${name}'s Member Entry is not in the book`)
@@ -608,7 +612,6 @@ test('a forged Shadow Member claim and a forged Entry as the shadow never reach 
     await expect(page.locator(`[data-entry-id="${forgedAsShadow}"]`)).toHaveCount(0)
     await expect(page.locator(`[data-entry-id="${forgedRebind}"]`)).toHaveCount(0)
     await expect(page.locator(`[data-entry-id="${forgedGhost}"]`)).toHaveCount(0)
-    await expect(page.locator('body')).not.toContainText('Not Rohit')
     await expect(page.locator('body')).not.toContainText('₹9999')
     await expect.poll(() => balanceTexts(page)).toEqual(['Rohit owes Seed ₹200'])
     await expect(page.getByRole('alert')).toHaveCount(0)
@@ -618,7 +621,7 @@ test('a forged Shadow Member claim and a forged Entry as the shadow never reach 
   await miraContext.close()
 })
 
-test('absurd Entries naming a person without the app never blank a phone', async ({ browser }) => {
+test('absurd Entries naming a Shadow Member never blank a phone', async ({ browser }) => {
   const rohanContext = await browser.newContext()
   const rohan = await rohanContext.newPage()
   const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')

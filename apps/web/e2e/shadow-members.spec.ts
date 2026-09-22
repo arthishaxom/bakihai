@@ -292,7 +292,7 @@ test('a claim against a Shadow Member is confirmed by the holder', async ({ brow
   await miraContext.close()
 })
 
-test("the book keeps folding and settling a person without the app after its holder's key is gone", async ({
+test("the book keeps folding and settling a Shadow Member after its holder's key is gone", async ({
   browser,
 }) => {
   const rohanContext = await browser.newContext(PHONE)
@@ -330,6 +330,18 @@ test("the book keeps folding and settling a person without the app after its hol
   await expect(memberRow(mira, 'Rohit')).toContainText('No phone · Added by Rohan')
   await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohit ₹200'])
 
+  // The person gets a new phone and rejoins under his own name. His key is
+  // new, so it attests nothing: the shadow's frozen holder stays the old
+  // Rohan, who now sits under Archived.
+  const successorContext = await browser.newContext(PHONE)
+  const successor = await successorContext.newPage()
+  await joinGroup(successor, invite, 'Rohan (new)')
+  await expect
+    .poll(async () => (await memberNames(successor)).sort())
+    .toEqual(['Mira', 'Rohan (new)', 'Rohit'])
+  await expect(memberRow(successor, 'Rohit')).toContainText('No phone · Added by Rohan')
+  await expect.poll(() => archivedMemberNames(successor)).toEqual(['Rohan'])
+
   // Settling still works: Mira records what she paid.
   const form = await openSettlementForm(mira)
 
@@ -340,26 +352,34 @@ test("the book keeps folding and settling a person without the app after its hol
   await expect(mira.getByTestId('entry-list')).toContainText('Mira paid Rohit ₹200')
 
   // Attestation ended with Rohan's key: the claim keeps its place in the book
-  // and its wait on that frozen key (ADR-0018, ADR-0021), but no Confirm is
-  // offered here, because nobody left holds it.
-  const detail = await openEntrySheet(mira, entryRow(mira, 'settlement'))
+  // and its wait on that frozen key (ADR-0018, ADR-0021), while the rejoin
+  // that inherited Rohan's name holds nothing and is offered no Confirm.
+  const detail = await openEntrySheet(successor, entryRow(successor, 'settlement'))
 
   await expect(detail.getByTestId('confirm-settlement')).toHaveCount(0)
   await expect(detail.getByTestId('settlement-status')).toHaveText('Waiting for Rohan to confirm')
+  await successor.keyboard.press('Escape')
+  await expect(successor.getByRole('dialog')).toHaveCount(0)
+
+  // Neither is the shadow's payer.
+  const payerDetail = await openEntrySheet(mira, entryRow(mira, 'settlement'))
+
+  await expect(payerDetail.getByTestId('confirm-settlement')).toHaveCount(0)
   await mira.keyboard.press('Escape')
   await expect(mira.getByRole('dialog')).toHaveCount(0)
 
-  // And it is still archivable like any Member: the marker folds, and the
-  // frozen holder's name stays on the row.
+  // And the shadow is still archivable like any Member: the marker folds, and
+  // the frozen holder's name stays on the row.
   await memberRow(mira, 'Rohit').getByTestId('archive-member').click()
   await expect.poll(() => archivedMemberNames(mira)).toEqual(['Rohan', 'Rohit'])
   await expect(archivedMemberRow(mira, 'Rohit')).toContainText('No phone · Added by Rohan')
   await expect(archivedMemberRow(mira, 'Rohit')).toContainText('Archived')
 
   await miraContext.close()
+  await successorContext.close()
 })
 
-test('a person who installs the app joins as a new Member while the shadow keeps its history', async ({
+test('a person who installs the app joins as a new Member while the Shadow Member keeps its history', async ({
   browser,
 }) => {
   const rohanContext = await browser.newContext(PHONE)

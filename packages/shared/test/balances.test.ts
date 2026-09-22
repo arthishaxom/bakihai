@@ -304,7 +304,7 @@ describe('foldBalances', () => {
     expect(foldBalances([...entries].reverse())).toEqual(expected)
   })
 
-  it('saturates an absurd net between a Member and their person with no phone', async () => {
+  it('saturates an absurd net with a Shadow Member in the pair', async () => {
     const rohan = await makeDevice()
     const rohitId = uuidv7()
     // The same crafted pair, with one side a Shadow Member: the fold treats
