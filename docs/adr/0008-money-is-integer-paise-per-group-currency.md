@@ -10,4 +10,4 @@ All amounts are stored as integer paise, never as rupees or floats: floating poi
 
 ## Consequences
 
-Supporting a currency with a different number of decimals later needs a per-Group currency and minor-unit scale. UPI amounts map 1:1 onto paise.
+Supporting a currency with a different number of decimals later needs a per-Group currency and minor-unit scale. UPI amounts map 1:1 onto paise. Long sums stay exact while they fit JavaScript's exact-integer range; a book that leaves it saturates at the ceiling rather than folding a wrong number (ADR-0019).

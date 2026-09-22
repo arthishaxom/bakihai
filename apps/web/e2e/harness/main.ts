@@ -175,25 +175,42 @@ provider.on('error', (error) => {
 // Entry was written on this device or arrived from the relay.
 entriesMap(doc).observe(() => render())
 
+/**
+ * Signs an Entry with the given authorship, writes it, and re-renders. The
+ * payload is whatever the test asks for, valid or absurd, exactly like a
+ * modified client's; a forged Entry passes its whole author at once, so a
+ * claim and the key that signed it can never disagree.
+ */
+async function signAndPut(input: {
+  type: string
+  payload: UnsignedEntryEnvelope['payload']
+  author?: { deviceId: string; signerPublicKey: string; privateKey: CryptoKey }
+}): Promise<string> {
+  const entry = await signEntryEnvelope(
+    {
+      id: uuidv7(),
+      schemaVersion: ENTRY_SCHEMA_VERSION,
+      authorDeviceId: input.author?.deviceId ?? deviceId,
+      signerPublicKey: input.author?.signerPublicKey ?? signerPublicKey,
+      occurredAt: new Date().toISOString(),
+      type: input.type,
+      payload: input.payload,
+    },
+    input.author?.privateKey ?? deviceKeys.privateKey,
+  )
+
+  putEntry(doc, entry)
+  render()
+
+  return entry.id
+}
+
 window.harness = {
   async addEntry(input) {
-    const entry = await signEntryEnvelope(
-      {
-        id: uuidv7(),
-        schemaVersion: ENTRY_SCHEMA_VERSION,
-        authorDeviceId: deviceId,
-        signerPublicKey,
-        occurredAt: new Date().toISOString(),
-        type: 'expense',
-        payload: { note: input.note, amountPaise: input.amountPaise },
-      },
-      deviceKeys.privateKey,
-    )
-
-    putEntry(doc, entry)
-    render()
-
-    return entry.id
+    return signAndPut({
+      type: 'expense',
+      payload: { note: input.note, amountPaise: input.amountPaise },
+    })
   },
   async joinAs(displayName) {
     const entry = await createMemberEntry({
@@ -209,26 +226,8 @@ window.harness = {
     return entry.id
   },
   async addSignedEntry(input) {
-    // The harness is a Member, so its Entries pass admission; the payload is
-    // whatever the test asks for, valid or absurd, exactly like a modified
-    // client's.
-    const entry = await signEntryEnvelope(
-      {
-        id: uuidv7(),
-        schemaVersion: ENTRY_SCHEMA_VERSION,
-        authorDeviceId: deviceId,
-        signerPublicKey,
-        occurredAt: new Date().toISOString(),
-        type: input.type,
-        payload: input.payload,
-      },
-      deviceKeys.privateKey,
-    )
-
-    putEntry(doc, entry)
-    render()
-
-    return entry.id
+    // The harness is a Member, so its Entries pass admission.
+    return signAndPut({ type: input.type, payload: input.payload })
   },
   deviceId: () => deviceId,
   injectRaw(key, value) {
@@ -239,23 +238,16 @@ window.harness = {
     // A fresh key signs an Entry that claims someone else's device id; the
     // signature itself is real, so only roster binding can reject it.
     const forgedKeys = await generateSigningKeyPair()
-    const entry = await signEntryEnvelope(
-      {
-        id: uuidv7(),
-        schemaVersion: ENTRY_SCHEMA_VERSION,
-        authorDeviceId: input.authorDeviceId,
+
+    return signAndPut({
+      type: input.type,
+      payload: input.payload,
+      author: {
+        deviceId: input.authorDeviceId,
         signerPublicKey: await exportSigningPublicKey(forgedKeys.publicKey),
-        occurredAt: new Date().toISOString(),
-        type: input.type,
-        payload: input.payload,
+        privateKey: forgedKeys.privateKey,
       },
-      forgedKeys.privateKey,
-    )
-
-    putEntry(doc, entry)
-    render()
-
-    return entry.id
+    })
   },
   entryValues: () => [...entriesMap(doc).values()] as unknown[],
   newId: () => uuidv7(),

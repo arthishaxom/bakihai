@@ -3,9 +3,14 @@ import * as Y from 'yjs'
 import { createBookDoc, entriesMap, putEntry, readEntries } from '../src/book'
 import type { EntryEnvelope } from '../src/entry-envelope'
 import { foldBalances } from '../src/group/balances'
+import { createLoanEntry, createReturnEntry } from '../src/group/loans'
+import { createMemberArchivedEntry } from '../src/group/member-archives'
 import { foldMembers } from '../src/group/members'
+import { createPaymentAddressEntry } from '../src/group/payment-addresses'
+import { createSettlementConfirmEntry, createSettlementEntry } from '../src/group/settlements'
+import { createVoidEntry } from '../src/group/voids'
 import { uuidv7 } from '../src/uuidv7'
-import { makeEntry } from './helpers/entries'
+import { makeDevice, makeEntry } from './helpers/entries'
 
 describe('book document', () => {
   it('holds Entries as plain JSON values in a map keyed by Entry id', async () => {
@@ -42,6 +47,62 @@ describe('book document', () => {
 
     // The first value stays; a second write for an id is a no-op, not a rewrite.
     expect(entriesMap(doc).get(entry.id)).toBe(entry)
+    expect(updates).toHaveLength(0)
+  })
+
+  it('writing the same id twice changes nothing for every P2 Entry type', async () => {
+    const doc = createBookDoc()
+    const author = await makeDevice()
+    const other = await makeDevice()
+    const writer = {
+      deviceId: author.deviceId,
+      signerPublicKey: author.signerPublicKey,
+      privateKey: author.keyPair.privateKey,
+    }
+    const loan = await createLoanEntry({
+      ...writer,
+      itemLabel: 'eggs',
+      quantityHundredths: 300,
+      lenderDeviceId: author.deviceId,
+      borrowerDeviceId: other.deviceId,
+    })
+    // One Entry of every type P2 added, built by the real writer for that type.
+    const entries = [
+      loan,
+      await createReturnEntry({ ...writer, loanEntryId: loan.id, quantityHundredths: 100 }),
+      await createSettlementEntry({
+        ...writer,
+        fromDeviceId: author.deviceId,
+        toDeviceId: other.deviceId,
+        amountPaise: 5_000,
+      }),
+      await createSettlementConfirmEntry({ ...writer, settlementEntryId: uuidv7() }),
+      await createVoidEntry({ ...writer, targetEntryId: uuidv7() }),
+      await createMemberArchivedEntry({ ...writer, memberDeviceId: other.deviceId }),
+      await createPaymentAddressEntry({
+        ...writer,
+        upiId: 'author@okhdfcbank',
+        payeeName: 'Author',
+      }),
+    ]
+
+    for (const entry of entries) {
+      putEntry(doc, entry)
+    }
+
+    const updates: Uint8Array[] = []
+    doc.on('update', (update) => updates.push(update))
+
+    // A second write for an id is a no-op whatever the Entry type.
+    for (const entry of entries) {
+      putEntry(doc, entry)
+    }
+
+    expect(
+      readEntries(doc)
+        .map((entry) => entry.id)
+        .sort(),
+    ).toEqual(entries.map((entry) => entry.id).sort())
     expect(updates).toHaveLength(0)
   })
 

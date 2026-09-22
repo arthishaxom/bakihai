@@ -7,7 +7,7 @@
  * but whose sum is not (#21), so the folds saturate here rather than handing
  * the screens a number no formatter can read.
  */
-export const MAX_EXACT_SUM = Number.MAX_SAFE_INTEGER
+const MAX_EXACT_SUM = Number.MAX_SAFE_INTEGER
 
 /**
  * Adds two non-negative amounts, saturating at the ceiling. Saturating addition

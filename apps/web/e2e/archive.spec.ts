@@ -116,6 +116,35 @@ test('filter chips narrow the Entries list by type and survive a reload', async 
   await miraContext.close()
 })
 
+test('a filter with nothing under it explains the empty list', async ({ browser }) => {
+  const rohanContext = await browser.newContext(PHONE)
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  const miraContext = await browser.newContext(PHONE)
+  const mira = await miraContext.newPage()
+  await joinGroup(mira, invite, 'Mira')
+  await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Mira'])
+
+  await addExpense(rohan, '100')
+
+  // Expenses has a line under it; Loans does not, so the list goes empty while
+  // the book still holds Entries.
+  await filterEntries(rohan, 'loans')
+  await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(0)
+  await expect(rohan.getByTestId('no-visible-entries')).toHaveText(
+    'Nothing matches. Try another filter, or turn on Show hidden.',
+  )
+
+  // The chip is the only reason the list is empty; All brings the line back.
+  await filterEntries(rohan, 'all')
+  await expect(rohan.getByTestId('no-visible-entries')).toHaveCount(0)
+  await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(1)
+
+  await rohanContext.close()
+  await miraContext.close()
+})
+
 test('a Settled Expense archives after 14 days while a fresh one and an open one stay', async ({
   browser,
 }) => {

@@ -46,6 +46,17 @@ const SYNC_LABELS: Record<SyncStatus, string> = {
   disconnected: 'Offline',
 }
 
+/**
+ * Whether both sides of a pair — a Balance's debtor and creditor, a
+ * Settlement's payer and receiver — are Members the roster holds. An accepted
+ * Entry can still name a device id no Member Entry bound, and neither a
+ * Balance nor a waiting Settlement with someone who is not here is this
+ * Group's business.
+ */
+function pairInRoster(memberIds: ReadonlySet<string>, left: string, right: string): boolean {
+  return memberIds.has(left) && memberIds.has(right)
+}
+
 function compareTextDesc(left: string, right: string): number {
   if (left < right) {
     return 1
@@ -174,14 +185,14 @@ function BookScreen({ identity }: { identity: Identity }) {
   )
   // Balances are between Members: an accepted Entry can still name someone who
   // is not in the roster, and a Balance with them is not this Group's business.
-  const visibleBalances = balances.filter(
-    (balance) => memberIds.has(balance.debtorDeviceId) && memberIds.has(balance.creditorDeviceId),
+  const visibleBalances = balances.filter((balance) =>
+    pairInRoster(memberIds, balance.debtorDeviceId, balance.creditorDeviceId),
   )
   // The waiting count is between Members too: a claim naming someone the roster
-  // does not hold can never be confirmed here, so it never sits in limbo on the
-  // screens either.
-  const waitingSettlements = settlementsAwaitingConfirmation.filter(
-    (settlement) => memberIds.has(settlement.fromDeviceId) && memberIds.has(settlement.toDeviceId),
+  // does not hold can never be confirmed here, so it never joins the count
+  // beside Balances — its line stays in the ledger as the Entry it is.
+  const visibleWaitingSettlements = settlementsAwaitingConfirmation.filter((settlement) =>
+    pairInRoster(memberIds, settlement.fromDeviceId, settlement.toDeviceId),
   )
   const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
   // The items a Settlement can be tagged to: everything still open, newest
@@ -506,11 +517,11 @@ function BookScreen({ identity }: { identity: Identity }) {
         <h2 id="balances-heading" className="font-semibold text-lg">
           Balances
         </h2>
-        {waitingSettlements.length > 0 ? (
+        {visibleWaitingSettlements.length > 0 ? (
           <p data-testid="waiting-count" className="text-muted-foreground text-sm">
-            {waitingSettlements.length === 1
+            {visibleWaitingSettlements.length === 1
               ? '1 Settlement waiting for confirmation'
-              : `${waitingSettlements.length} Settlements waiting for confirmation`}
+              : `${visibleWaitingSettlements.length} Settlements waiting for confirmation`}
           </p>
         ) : null}
         {visibleBalances.length > 0 ? (
