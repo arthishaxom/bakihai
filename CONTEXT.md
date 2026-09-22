@@ -9,8 +9,12 @@ The set of members who share one book.
 _Avoid_: circle, room, account
 
 **Member**:
-A person in a Group, identified on their phone by a device key.
+A person in a Group, identified by a device key. Usually their own phone holds it; a Shadow Member's is held by the Member who added them.
 _Avoid_: user, friend, contact
+
+**Shadow Member**:
+A Member with no phone, added by another Member who holds their device key and records their side of the book.
+_Avoid_: counterparty, contact, guest
 
 **Entry**:
 A single immutable line in the book, recording something that happened.
