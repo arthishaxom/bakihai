@@ -118,6 +118,38 @@ export function foldMemberKeys(entries: EntryEnvelope[]): Map<string, string> {
 }
 
 /**
+ * The Member holding each Shadow Member's key, folded from Member Entries
+ * (ADR-0020): a key's first claimant by Entry id is the phone that carries it,
+ * and every other device id bound to that key is a person that phone tracks.
+ * Members whose key is their own are absent, so the map is exactly the Group's
+ * Shadows. A later claim on a device id that another key already bound cannot
+ * invent one, because the id's first claim still owns it.
+ */
+export function foldShadowHolders(entries: EntryEnvelope[]): Map<string, string> {
+  const bound = new Set<string>()
+  const holderByKey = new Map<string, string>()
+  const holders = new Map<string, string>()
+
+  for (const claim of memberClaims(entries)) {
+    if (bound.has(claim.deviceId)) {
+      continue
+    }
+
+    bound.add(claim.deviceId)
+
+    const holder = holderByKey.get(claim.signerPublicKey)
+
+    if (holder === undefined) {
+      holderByKey.set(claim.signerPublicKey, claim.deviceId)
+    } else {
+      holders.set(claim.deviceId, holder)
+    }
+  }
+
+  return holders
+}
+
+/**
  * Folds the book's Member Entries into the Group roster, one entry per device:
  * the roster is a pure function of the Entries, so every device that holds the
  * same book shows the same Members (ADR-0001). A device's first Member Entry

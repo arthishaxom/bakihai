@@ -15,6 +15,7 @@ import {
   putEntry,
   readEntries,
   type SettlementTag,
+  uuidv7,
   verifyEntryEnvelope,
 } from '@bakihai/shared'
 import type { IndexeddbPersistence } from 'y-indexeddb'
@@ -69,6 +70,11 @@ export interface MemberArchiveDraft {
   memberDeviceId: string
 }
 
+/** The fields the Add-a-person sheet decides; the session signs and writes it. */
+export interface ShadowMemberDraft {
+  displayName: string
+}
+
 /** The fields a Settlement form decides; the session signs and writes the Settlement. */
 export interface SettlementDraft {
   fromDeviceId: string
@@ -116,6 +122,12 @@ export interface BookSession {
    * any other Entry, and Voiding it is how an archive is undone.
    */
   writeMemberArchive(input: MemberArchiveDraft): Promise<void>
+  /**
+   * Signs and writes a Member Entry for a person with no phone (ADR-0020): a
+   * fresh device id, bound to this device's key, so the book can name them in
+   * any Entry. It syncs like any other Entry.
+   */
+  writeShadowMember(input: ShadowMemberDraft): Promise<void>
   /** Signs and writes a Settlement to the local book; it syncs like any other Entry. */
   writeSettlement(input: SettlementDraft): Promise<void>
   /** Signs and writes a Confirm of a Settlement to the local book. */
@@ -252,6 +264,19 @@ function createBookSession(identity: Identity): BookSession {
         signerPublicKey: identity.signerPublicKey,
         privateKey,
         memberDeviceId: input.memberDeviceId,
+      })
+
+      putEntry(doc, entry)
+    },
+    async writeShadowMember(input) {
+      const privateKey = await deviceKey()
+      // A person with no phone gets a fresh device id of their own; the Entry
+      // is signed with this device's key, which then holds theirs (ADR-0020).
+      const entry = await createMemberEntry({
+        deviceId: uuidv7(),
+        signerPublicKey: identity.signerPublicKey,
+        privateKey,
+        displayName: input.displayName,
       })
 
       putEntry(doc, entry)

@@ -66,6 +66,7 @@ const exportedNames = [
   'foldPaymentAddresses',
   'foldSettlements',
   'foldSettlementsAwaitingConfirmation',
+  'foldShadowHolders',
   'foldVoids',
   'formatHundredthsAsQuantity',
   'formatPaiseAsRupees',

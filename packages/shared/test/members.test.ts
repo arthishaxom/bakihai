@@ -4,10 +4,12 @@ import {
   createMemberEntry,
   foldMemberKeys,
   foldMembers,
+  foldShadowHolders,
   MEMBER_DISPLAY_NAME_MAX_LENGTH,
   MEMBER_ENTRY_TYPE,
   type Member,
 } from '../src/group/members'
+import { uuidv7 } from '../src/uuidv7'
 import { makeDevice, makeEntry, makeMemberEntry, type TestDevice } from './helpers/entries'
 
 const JOINED_AT = '2026-09-20T10:00:00.000Z'
@@ -154,5 +156,98 @@ describe('foldMembers', () => {
   it('is empty for a book with no Member Entries', async () => {
     expect(foldMembers([])).toEqual([])
     expect(foldMembers([await makeEntry('dinner')])).toEqual([])
+  })
+})
+
+describe('foldShadowHolders', () => {
+  it('names the Member holding a person-with-no-phone key', async () => {
+    const rohan = await makeDevice()
+    const rohitId = uuidv7()
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+    ]
+
+    expect(foldShadowHolders(entries)).toEqual(new Map([[rohitId, rohan.deviceId]]))
+  })
+
+  it('leaves Members whose own phone holds their key out of the map', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+
+    expect(
+      foldShadowHolders([
+        await makeMemberEntry(rohan, 'Rohan'),
+        await makeMemberEntry(mira, 'Mira'),
+      ]),
+    ).toEqual(new Map())
+  })
+
+  it('holds several shadows under the one key', async () => {
+    const rohan = await makeDevice()
+    const rohitId = uuidv7()
+    const kabirId = uuidv7()
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+      await makeMemberEntry({ ...rohan, deviceId: kabirId }, 'Kabir'),
+    ]
+
+    expect(foldShadowHolders(entries)).toEqual(
+      new Map([
+        [rohitId, rohan.deviceId],
+        [kabirId, rohan.deviceId],
+      ]),
+    )
+  })
+
+  it('holds the same shadows whatever order the Entries arrive in', async () => {
+    const rohan = await makeDevice()
+    const rohitId = uuidv7()
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+    ]
+    const expected = foldShadowHolders(entries)
+
+    expect(foldShadowHolders([...entries].reverse())).toEqual(expected)
+  })
+
+  it('does not turn a rename claim by the same device into a shadow', async () => {
+    const rohan = await makeDevice()
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan', JOINED_AT),
+      await makeMemberEntry(rohan, 'Rohan S', LATER),
+    ]
+
+    expect(foldShadowHolders(entries)).toEqual(new Map())
+  })
+
+  it('ignores a claim on a shadow device id under another key', async () => {
+    const rohan = await makeDevice()
+    const mallory = await makeDevice()
+    const rohitId = uuidv7()
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+      await makeMemberEntry({ ...mallory, deviceId: rohitId }, 'Not Rohit', LATER),
+    ]
+
+    expect(foldShadowHolders(entries)).toEqual(new Map([[rohitId, rohan.deviceId]]))
+  })
+
+  it('does not count a rejected claim as a key holder', async () => {
+    const rohan = await makeDevice()
+    const mallory = await makeDevice()
+    const strangerId = uuidv7()
+    // Mallory first claims Rohan's device id under their own key (ignored by
+    // the binding), then signs a person with no phone under that same key.
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...mallory, deviceId: rohan.deviceId }, 'Not Rohan', LATER),
+      await makeMemberEntry({ ...mallory, deviceId: strangerId }, 'Stranger'),
+    ]
+
+    expect(foldShadowHolders(entries)).toEqual(new Map())
   })
 })

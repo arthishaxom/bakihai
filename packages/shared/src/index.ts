@@ -109,6 +109,7 @@ export {
   createMemberEntry,
   foldMemberKeys,
   foldMembers,
+  foldShadowHolders,
   MEMBER_DISPLAY_NAME_MAX_LENGTH,
   MEMBER_ENTRY_TYPE,
   type Member,

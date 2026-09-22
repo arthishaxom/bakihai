@@ -16,6 +16,7 @@ import {
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { AddEntrySheet } from '../book/AddEntrySheet'
+import { AddShadowMemberSheet } from '../book/AddShadowMemberSheet'
 import { EntryDetailSheet } from '../book/EntryDetailSheet'
 import {
   LEDGER_FILTER_LABELS,
@@ -98,6 +99,7 @@ function BookScreen({ identity }: { identity: Identity }) {
   const {
     entries,
     members,
+    shadowHolders,
     memberArchives,
     balances,
     expenses,
@@ -115,6 +117,7 @@ function BookScreen({ identity }: { identity: Identity }) {
     writeLoanSettle,
     writeVoid,
     writeMemberArchive,
+    writeShadowMember,
     writeSettlement,
     writeSettlementConfirm,
     writePaymentAddress,
@@ -123,6 +126,7 @@ function BookScreen({ identity }: { identity: Identity }) {
   const [copied, setCopied] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [addressOpen, setAddressOpen] = useState(false)
+  const [shadowMemberOpen, setShadowMemberOpen] = useState(false)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [settlingBalance, setSettlingBalance] = useState<Balance | null>(null)
   const [memberActionError, setMemberActionError] = useState<string | null>(null)
@@ -408,6 +412,11 @@ function BookScreen({ identity }: { identity: Identity }) {
         <ul data-testid="member-list" className="flex flex-col gap-1">
           {activeMembers.map((member) => {
             const address = paymentAddresses.get(member.deviceId)
+            const holderId = shadowHolders.get(member.deviceId)
+            const holder =
+              holderId === undefined
+                ? undefined
+                : members.find((candidate) => candidate.deviceId === holderId)
 
             return (
               <li
@@ -440,7 +449,15 @@ function BookScreen({ identity }: { identity: Identity }) {
                   <div className="flex min-h-11 w-full items-center justify-between gap-2 px-2 py-1.5">
                     <span className="flex min-w-0 items-baseline gap-2">
                       <span className="truncate">{member.displayName}</span>
-                      {address ? (
+                      {holder ? (
+                        <span
+                          data-testid="member-shadow-note"
+                          className="truncate text-muted-foreground text-sm"
+                        >
+                          No phone · Added by{' '}
+                          {holder.deviceId === identity.deviceId ? 'you' : holder.displayName}
+                        </span>
+                      ) : address ? (
                         <span
                           data-testid="member-upi"
                           className="truncate text-muted-foreground text-sm"
@@ -472,6 +489,14 @@ function BookScreen({ identity }: { identity: Identity }) {
             <li className="text-muted-foreground">No members yet.</li>
           ) : null}
         </ul>
+        <button
+          type="button"
+          data-testid="add-shadow-member"
+          onClick={() => setShadowMemberOpen(true)}
+          className="min-h-11 self-start rounded-md border border-foreground/20 px-3 py-2 text-sm"
+        >
+          Add a person without the app
+        </button>
         {archivedMembers.length > 0 ? (
           <div data-testid="archived-members" className="flex flex-col gap-1">
             <h3 className="font-medium text-muted-foreground text-sm">Archived</h3>
@@ -700,6 +725,14 @@ function BookScreen({ identity }: { identity: Identity }) {
           viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
           onSave={writePaymentAddress}
           onClose={() => setAddressOpen(false)}
+        />
+      ) : null}
+
+      {shadowMemberOpen ? (
+        <AddShadowMemberSheet
+          members={activeMembers}
+          onAdd={writeShadowMember}
+          onClose={() => setShadowMemberOpen(false)}
         />
       ) : null}
 

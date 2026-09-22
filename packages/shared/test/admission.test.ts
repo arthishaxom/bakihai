@@ -7,7 +7,7 @@ import {
 } from '../src/entry-envelope'
 import { admitEntries } from '../src/group/admission'
 import { foldBalances } from '../src/group/balances'
-import { foldMembers } from '../src/group/members'
+import { foldMembers, foldShadowHolders } from '../src/group/members'
 import { uuidv7 } from '../src/uuidv7'
 import { makeDevice, makeExpenseEntry, makeMemberEntry, type TestDevice } from './helpers/entries'
 
@@ -172,5 +172,57 @@ describe('admitEntries', () => {
     })
 
     expect(admitEntries([expense])).toEqual([])
+  })
+
+  it('admits the Member Entry a device signs for a person with no phone', async () => {
+    const rohan = await makeDevice()
+    const rohitId = uuidv7()
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+    ]
+
+    expect(admitEntries(entries)).toEqual(entries)
+    expect(foldShadowHolders(admitEntries(entries))).toEqual(new Map([[rohitId, rohan.deviceId]]))
+  })
+
+  it('drops an Entry written as a person with no phone under the wrong key', async () => {
+    const rohan = await makeDevice()
+    const mallory = await makeDevice()
+    const rohitId = uuidv7()
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+      // Mallory signs an Expense claiming to be Rohan's person with no phone.
+      await entrySignedBy(mallory, rohitId, 'expense', {
+        amountPaise: 90_000,
+        payerDeviceId: rohitId,
+        participantDeviceIds: [rohan.deviceId],
+      }),
+    ]
+
+    expect(admitEntries(entries)).toEqual(entries.slice(0, 2))
+  })
+
+  it('drops a Member Entry that tries to rebind a person with no phone', async () => {
+    const rohan = await makeDevice()
+    const mallory = await makeDevice()
+    const rohitId = uuidv7()
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+      await makeMemberEntry(
+        { ...mallory, deviceId: rohitId },
+        'Not Rohit',
+        '2026-09-21T10:00:00.000Z',
+      ),
+    ]
+
+    expect(admitEntries(entries)).toEqual(entries.slice(0, 2))
+    expect(
+      foldMembers(admitEntries(entries))
+        .map((member) => member.displayName)
+        .sort(),
+    ).toEqual(['Rohan', 'Rohit'])
   })
 })
