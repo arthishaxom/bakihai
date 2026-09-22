@@ -10,6 +10,7 @@ import {
   createSettlementConfirmEntry,
   createSettlementEntry,
   createVoidEntry,
+  type EntryEnvelope,
   fromBase64Url,
   MEMBER_ENTRY_TYPE,
   putEntry,
@@ -274,7 +275,7 @@ function createBookSession(identity: Identity): BookSession {
       // is signed with this device's key, which then holds theirs (ADR-0020).
       // The id is minted after this device's own, so a clock that moved
       // backwards cannot invert the pair in the holder fold (#27).
-      const ownEntryId = ownBindingEntryId(doc, identity)
+      const ownEntryId = await ownBindingEntryId(doc, identity)
       const entry = await createMemberEntry({
         deviceId: uuidv7(),
         signerPublicKey: identity.signerPublicKey,
@@ -372,11 +373,7 @@ async function ensureOwnMemberEntry(
  */
 async function hasOwnMemberEntry(doc: Y.Doc, identity: Identity): Promise<boolean> {
   for (const entry of readEntries(doc)) {
-    if (
-      entry.type !== MEMBER_ENTRY_TYPE ||
-      entry.authorDeviceId !== identity.deviceId ||
-      entry.signerPublicKey !== identity.signerPublicKey
-    ) {
+    if (!isOwnMemberClaim(entry, identity)) {
       continue
     }
 
@@ -393,28 +390,47 @@ async function hasOwnMemberEntry(doc: Y.Doc, identity: Identity): Promise<boolea
 }
 
 /**
+ * Whether an Entry claims this device's own Member Entry: its id and signing
+ * key, before the signature is checked. A claim matching our id and key that
+ * we did not sign is a forgery the checks in the callers drop (#8, ADR-0012).
+ */
+function isOwnMemberClaim(entry: EntryEnvelope, identity: Identity): boolean {
+  return (
+    entry.type === MEMBER_ENTRY_TYPE &&
+    entry.authorDeviceId === identity.deviceId &&
+    entry.signerPublicKey === identity.signerPublicKey
+  )
+}
+
+/**
  * The Entry id that binds this device: the earliest Member Entry it wrote
- * under its own key. A Shadow Member's Entry is minted after it, whatever the
+ * under its own key, verified like an announcement, so a tampered claim cannot
+ * move the floor. A Shadow Member's Entry is minted after it, whatever the
  * clock says, so the holder fold always reads the phone before the person it
  * tracks (ADR-0020, #27). Entry ids are UUIDv7 strings, so lexical order is
- * the fold's order (ADR-0012). Undefined only while this device's Member
- * Entry has not reached the local book.
+ * the fold's order (ADR-0012). Undefined only while no verified Member Entry
+ * of this device has reached the local book.
  */
-function ownBindingEntryId(doc: Y.Doc, identity: Identity): string | undefined {
+async function ownBindingEntryId(doc: Y.Doc, identity: Identity): Promise<string | undefined> {
   let binding: string | undefined
 
   for (const entry of readEntries(doc)) {
-    if (
-      entry.type !== MEMBER_ENTRY_TYPE ||
-      entry.authorDeviceId !== identity.deviceId ||
-      entry.signerPublicKey !== identity.signerPublicKey
-    ) {
+    if (!isOwnMemberClaim(entry, identity)) {
       continue
     }
 
-    if (binding === undefined || entry.id < binding) {
-      binding = entry.id
+    if (binding !== undefined && entry.id >= binding) {
+      continue
     }
+
+    try {
+      await verifyEntryEnvelope(entry)
+    } catch {
+      // Not signed by this device; it cannot be the Entry that binds us.
+      continue
+    }
+
+    binding = entry.id
   }
 
   return binding

@@ -47,6 +47,8 @@ describe('uuidv7', () => {
 
   it('rejects a string that is not a UUIDv7', () => {
     expect(() => uuidv7Timestamp('not-an-entry-id')).toThrow(RangeError)
+    // Parses hex for a while, but is not a UUIDv7 in full.
+    expect(() => uuidv7Timestamp('01234567-89zz-7000-8000-000000000000')).toThrow(RangeError)
   })
 
   it('mints after an id even when the clock is behind it', () => {

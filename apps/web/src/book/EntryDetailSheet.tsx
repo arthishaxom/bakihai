@@ -28,6 +28,7 @@ import type {
   VoidDraft,
 } from './session'
 import {
+  canAttestSettlement,
   describeEntry,
   describeExpenseCoverage,
   describeSettlementStatus,
@@ -88,7 +89,7 @@ interface EntryDetailSheetProps {
   members: Member[]
   /**
    * The Member holding each Shadow Member's key (ADR-0020), so a claim against
-   * a person with no phone waits on their holder and the holder can attest.
+   * a person with no phone waits on their holder.
    */
   shadowHolders: ReadonlyMap<string, string>
   /** Signs and writes a Return against `loan`; resolves once it is in the local book. */
@@ -185,18 +186,13 @@ export function EntryDetailSheet({
   // of a Settlement, offer no share to settle.
   const outstandingExpense = entry.type === EXPENSE_ENTRY_TYPE && !voidedBy ? expense : undefined
   // Only the Member whose key binds the receiver's id can attest to a claim
-  // (ADR-0021). The gate reads that binding — the same rule the Settlement
-  // fold applies — rather than the roster's holder classification, so id order
-  // that has inverted a Shadow Member and its holder cannot withhold a Confirm
-  // the fold would accept (#27).
-  const receiverKey =
-    settlement === undefined
-      ? undefined
-      : members.find((member) => member.deviceId === settlement.toDeviceId)?.signerPublicKey
+  // (ADR-0021): the gate reads that binding, the rule the Settlement fold
+  // applies, so id order that has inverted a Shadow Member and its holder
+  // cannot withhold a Confirm the fold would accept (#27).
   const canConfirm =
     settlement !== undefined &&
     !settlement.confirmed &&
-    receiverKey === viewer.signerPublicKey &&
+    canAttestSettlement(settlement, members, viewer) &&
     !voidedBy
   // A Voided Settlement reads its tag from its own payload; a live one from the fold.
   const settlementTag = settlementTagOf(entry, settlement)
@@ -426,7 +422,7 @@ export function EntryDetailSheet({
 
         {settlement ? (
           <p data-testid="settlement-status" className="text-sm">
-            {describeSettlementStatus(settlement, members, shadowHolders)}
+            {describeSettlementStatus(settlement, members, shadowHolders, viewer)}
           </p>
         ) : null}
 

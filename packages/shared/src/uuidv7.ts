@@ -1,5 +1,8 @@
 const MAX_TIMESTAMP_MS = 2 ** 48 - 1
 
+/** An RFC 9562 UUIDv7: version 7 in byte 6, RFC 4122 variant in byte 8. */
+const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 /**
  * Generates an RFC 9562 UUIDv7 from the device clock. The first 48 bits hold
  * the millisecond timestamp, so ids sort lexicographically by creation time;
@@ -32,13 +35,11 @@ export function uuidv7(now: number = Date.now()): string {
  * key that entry id order reads (ADR-0012, ADR-0020).
  */
 export function uuidv7Timestamp(id: string): number {
-  const timestamp = Number.parseInt(`${id.slice(0, 8)}${id.slice(9, 13)}`, 16)
-
-  if (!Number.isSafeInteger(timestamp)) {
+  if (!UUID_V7_PATTERN.test(id)) {
     throw new RangeError(`Not a UUIDv7: ${id}`)
   }
 
-  return timestamp
+  return Number.parseInt(`${id.slice(0, 8)}${id.slice(9, 13)}`, 16)
 }
 
 /**

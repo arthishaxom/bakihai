@@ -675,11 +675,12 @@ test('a Settlement to an inverted Shadow Member is still confirmed by the key ho
   await form.getByRole('button', { name: 'Add settlement' }).click()
   await expect(entryRow(rohan, 'settlement')).toContainText('Waiting for Rohit to confirm')
 
-  // The holder name is the fold's guess from id order; who can attest is the
-  // key rule (ADR-0021), so Mira's phone offers the Confirm all the same.
+  // Rohan's book names the fold's holder, the only identification it has; on
+  // Mira's phone, whose key is the one that attests, the wait names Mira and
+  // the Confirm is offered (ADR-0021).
   const sheet = await openEntrySheet(mira, entryRow(mira, 'settlement'))
 
-  await expect(sheet.getByTestId('settlement-status')).toHaveText('Waiting for Rohit to confirm')
+  await expect(sheet.getByTestId('settlement-status')).toHaveText('Waiting for Mira to confirm')
   await expect(sheet.getByTestId('confirm-settlement')).toBeVisible()
   await sheet.getByTestId('confirm-settlement').click()
   await expect(mira.getByRole('dialog')).toHaveCount(0)

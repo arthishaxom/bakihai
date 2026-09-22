@@ -643,7 +643,7 @@ function BookScreen({ identity }: { identity: Identity }) {
                       ) : null}
                       {settlement && !settlement.confirmed ? (
                         <span className="text-muted-foreground text-sm">
-                          {describeSettlementStatus(settlement, members, shadowHolders)}
+                          {describeSettlementStatus(settlement, members, shadowHolders, identity)}
                         </span>
                       ) : null}
                       <span className="text-muted-foreground text-sm">

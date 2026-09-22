@@ -390,21 +390,45 @@ export function describeSettlementLine(
   return `${nameFor(members, fromDeviceId)} paid ${nameFor(members, toDeviceId)} ${amount}`
 }
 
+/** The signing key a Member's device id is bound to in the roster (ADR-0012). */
+function keyBindingFor(members: Member[], deviceId: string): string | undefined {
+  return members.find((member) => member.deviceId === deviceId)?.signerPublicKey
+}
+
+/**
+ * Whether this viewer's key is the one that attests for a Settlement's
+ * receiver (ADR-0021). The rule is the binding, not the roster's holder
+ * classification: the Settlement fold accepts a Confirm by that key, so the
+ * action must be offered by the same rule.
+ */
+export function canAttestSettlement(
+  settlement: SettlementState,
+  members: Member[],
+  viewer: Pick<Member, 'signerPublicKey'>,
+): boolean {
+  return keyBindingFor(members, settlement.toDeviceId) === viewer.signerPublicKey
+}
+
 /**
  * Whether a Settlement has been attested to, and by whom: a Settlement the
  * receiver's key wrote is confirmed from the start, a payer's claim waits for
  * that key — the receiver's own phone, or a Shadow Member's holder (ADR-0015,
- * ADR-0021) — and a Confirm names the key holder who wrote it.
+ * ADR-0021) — and a Confirm names the key holder who wrote it. The wait names
+ * the roster's holder, except on the phone whose key it actually is: that
+ * phone reads its own name, not the fold's guess, so an id order that inverted
+ * the pair cannot show it a phantom wait beside its Confirm (#27).
  */
 export function describeSettlementStatus(
   settlement: SettlementState,
   members: Member[],
   shadowHolders: ReadonlyMap<string, string>,
+  viewer: Pick<Member, 'deviceId' | 'signerPublicKey'>,
 ): string {
   if (!settlement.confirmed) {
     const holderId = shadowHolders.get(settlement.toDeviceId) ?? settlement.toDeviceId
+    const attesterId = canAttestSettlement(settlement, members, viewer) ? viewer.deviceId : holderId
 
-    return `Waiting for ${nameFor(members, holderId)} to confirm`
+    return `Waiting for ${nameFor(members, attesterId)} to confirm`
   }
 
   const attesterId = settlement.confirmation?.authorDeviceId ?? settlement.entry.authorDeviceId
