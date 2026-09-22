@@ -8,7 +8,7 @@ import { foldVoids } from './voids'
 /** Entry type that records a Settlement: a real payment from one Member to another. */
 export const SETTLEMENT_ENTRY_TYPE = 'settlement'
 
-/** Entry type that records a Confirm: a Settlement's receiver attesting to a claim. */
+/** Entry type that records a Confirm: a Settlement's receiver's key attesting to a claim. */
 export const SETTLEMENT_CONFIRM_ENTRY_TYPE = 'settlement-confirm'
 
 /** Longest note a Settlement may carry. */
@@ -32,8 +32,9 @@ export type SettlementTag = z.infer<typeof settlementTagSchema>
  * The payload of a Settlement Entry: who paid whom, and how much. The amount is
  * stored exactly like paise (ADR-0008), the note is free text, and either side
  * may author it — the payer claims "I paid", the receiver records "they paid
- * me" (ADR-0007). A Settlement the receiver authored starts confirmed
- * (ADR-0015). An optional tag names the Expense or Loan this payment pays off.
+ * me" (ADR-0007). A Settlement the receiver's key authored starts confirmed
+ * (ADR-0015, ADR-0021). An optional tag names the Expense or Loan this payment
+ * pays off.
  */
 export const settlementEntryPayloadSchema = z
   .strictObject({
@@ -50,8 +51,8 @@ export const settlementEntryPayloadSchema = z
 export type SettlementEntryPayload = z.infer<typeof settlementEntryPayloadSchema>
 
 /**
- * The payload of a Confirm Entry: the Settlement the receiver attests to. A
- * Confirm naming a Voided Settlement is moot and ignored (ADR-0015).
+ * The payload of a Confirm Entry: the Settlement the receiver's key attests
+ * to. A Confirm naming a Voided Settlement is moot and ignored (ADR-0015).
  */
 export const settlementConfirmEntryPayloadSchema = z.strictObject({
   settlementEntryId: z.uuidv7(),
@@ -105,8 +106,9 @@ export interface CreateSettlementEntryInput {
 /**
  * Writes this device's Settlement Entry: a signed record of money that moved
  * between two Members. Either side may author it (ADR-0007), and a Settlement
- * the receiver authored is confirmed by its own authorship (ADR-0015). A tag,
- * when one is given, names the Expense or Loan the payment pays off.
+ * the receiver's key authored is confirmed by its own authorship (ADR-0015,
+ * ADR-0021). A tag, when one is given, names the Expense or Loan the payment
+ * pays off.
  */
 export async function createSettlementEntry(
   input: CreateSettlementEntryInput,
@@ -155,8 +157,8 @@ export interface CreateSettlementConfirmEntryInput {
 /**
  * Writes this device's Confirm Entry: a signed attestation that a Settlement
  * the receiver did not write happened. The fold is the gate, not this writer:
- * a Confirm from anyone but the receiver is ignored, so a device that never
- * received the money cannot mark it confirmed (ADR-0015).
+ * a Confirm from any key but the receiver's is ignored, so a device that never
+ * received the money cannot mark it confirmed (ADR-0015, ADR-0021).
  */
 export async function createSettlementConfirmEntry(
   input: CreateSettlementConfirmEntryInput,
@@ -284,9 +286,9 @@ export function foldSettlements(entries: EntryEnvelope[]): SettlementState[] {
 }
 
 /**
- * The Settlements still waiting for their receiver's attestation: payer-written
- * claims with no Confirm yet. This is the count the book shows near Balances,
- * so nothing sits in limbo (ADR-0007).
+ * The Settlements still waiting for the receiver's key to attest:
+ * payer-written claims with no Confirm yet. This is the count the book shows
+ * near Balances, so nothing sits in limbo (ADR-0007).
  */
 export function foldSettlementsAwaitingConfirmation(entries: EntryEnvelope[]): SettlementState[] {
   return foldSettlements(entries).filter((settlement) => !settlement.confirmed)

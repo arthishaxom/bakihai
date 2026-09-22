@@ -41,7 +41,7 @@ The optional reference a Settlement carries to the Expense or Loan it pays off. 
 _Avoid_: link, label, category
 
 **Confirm**:
-An Entry where a Settlement's receiver attests to a payment they did not record themselves.
+An Entry where a Settlement's receiver attests to a payment they did not record themselves; a Shadow Member's holder attests for them.
 _Avoid_: approve, accept
 
 **Payment address**:

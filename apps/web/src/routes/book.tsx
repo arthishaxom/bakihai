@@ -643,7 +643,7 @@ function BookScreen({ identity }: { identity: Identity }) {
                       ) : null}
                       {settlement && !settlement.confirmed ? (
                         <span className="text-muted-foreground text-sm">
-                          {describeSettlementStatus(settlement, members)}
+                          {describeSettlementStatus(settlement, members, shadowHolders)}
                         </span>
                       ) : null}
                       <span className="text-muted-foreground text-sm">
@@ -756,12 +756,9 @@ function BookScreen({ identity }: { identity: Identity }) {
           tagTargetNarrative={selectedNarrative?.tagTargetNarrative}
           tagOptions={tagOptions}
           paymentAddresses={paymentAddresses}
-          viewer={{
-            deviceId: identity.deviceId,
-            displayName: identity.displayName,
-            signerPublicKey: identity.signerPublicKey,
-          }}
+          viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
           members={members}
+          shadowHolders={shadowHolders}
           onReturn={writeReturn}
           onLoanSettle={writeLoanSettle}
           onSettlement={writeSettlement}

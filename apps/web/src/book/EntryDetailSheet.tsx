@@ -84,8 +84,13 @@ interface EntryDetailSheetProps {
    */
   paymentAddresses: ReadonlyMap<string, PaymentAddress>
   /** This device's Member identity, so whoever holds the receiver's key is offered a Confirm. */
-  viewer: Pick<Member, 'deviceId' | 'displayName' | 'signerPublicKey'>
+  viewer: Pick<Member, 'deviceId' | 'displayName'>
   members: Member[]
+  /**
+   * The Member holding each Shadow Member's key (ADR-0020), so a claim against
+   * a person with no phone waits on their holder and the holder can attest.
+   */
+  shadowHolders: ReadonlyMap<string, string>
   /** Signs and writes a Return against `loan`; resolves once it is in the local book. */
   onReturn: (input: ReturnDraft) => Promise<void>
   /**
@@ -138,6 +143,7 @@ export function EntryDetailSheet({
   paymentAddresses,
   viewer,
   members,
+  shadowHolders,
   onReturn,
   onLoanSettle,
   onSettlement,
@@ -180,14 +186,14 @@ export function EntryDetailSheet({
   const outstandingExpense = entry.type === EXPENSE_ENTRY_TYPE && !voidedBy ? expense : undefined
   // Only the Member holding the receiver's key can attest to a claim, and only
   // while the claim is unconfirmed and the Settlement not Voided (ADR-0021).
-  const receiverKey =
+  const receiverHolderId =
     settlement === undefined
       ? undefined
-      : members.find((member) => member.deviceId === settlement.toDeviceId)?.signerPublicKey
+      : (shadowHolders.get(settlement.toDeviceId) ?? settlement.toDeviceId)
   const canConfirm =
     settlement !== undefined &&
     !settlement.confirmed &&
-    receiverKey === viewer.signerPublicKey &&
+    receiverHolderId === viewer.deviceId &&
     !voidedBy
   // A Voided Settlement reads its tag from its own payload; a live one from the fold.
   const settlementTag = settlementTagOf(entry, settlement)
@@ -417,7 +423,7 @@ export function EntryDetailSheet({
 
         {settlement ? (
           <p data-testid="settlement-status" className="text-sm">
-            {describeSettlementStatus(settlement, members)}
+            {describeSettlementStatus(settlement, members, shadowHolders)}
           </p>
         ) : null}
 

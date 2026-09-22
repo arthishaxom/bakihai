@@ -34,8 +34,9 @@ function tagKeyOf(tag: SettlementTag): string {
 /**
  * The Settlement form: who paid whom, how much, and an optional note and tag.
  * A payer claims "I paid"; a receiver records "they paid me" — the receiver's
- * own authorship is what makes a Settlement confirmed from the start
- * (ADR-0015). An optional tag names the Expense or Loan the payment pays off,
+ * key authorship is what makes a Settlement confirmed from the start
+ * (ADR-0015, ADR-0021). An optional tag names the Expense or Loan the payment
+ * pays off,
  * defaulted when the form is opened from an item; without one, the Settlement
  * moves only the Balance (ADR-0004). Settle up locks the direction and
  * counterparty to a Balance's pair and prefills its net, leaving the amount

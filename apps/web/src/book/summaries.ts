@@ -393,12 +393,18 @@ export function describeSettlementLine(
 /**
  * Whether a Settlement has been attested to, and by whom: a Settlement the
  * receiver's key wrote is confirmed from the start, a payer's claim waits for
- * that key, and a Confirm names the key holder who wrote it (ADR-0015,
- * ADR-0021).
+ * that key — the receiver's own phone, or a Shadow Member's holder (ADR-0015,
+ * ADR-0021) — and a Confirm names the key holder who wrote it.
  */
-export function describeSettlementStatus(settlement: SettlementState, members: Member[]): string {
+export function describeSettlementStatus(
+  settlement: SettlementState,
+  members: Member[],
+  shadowHolders: ReadonlyMap<string, string>,
+): string {
   if (!settlement.confirmed) {
-    return `Waiting for ${nameFor(members, settlement.toDeviceId)} to confirm`
+    const holderId = shadowHolders.get(settlement.toDeviceId) ?? settlement.toDeviceId
+
+    return `Waiting for ${nameFor(members, holderId)} to confirm`
   }
 
   const attesterId = settlement.confirmation?.authorDeviceId ?? settlement.entry.authorDeviceId

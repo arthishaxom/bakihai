@@ -213,9 +213,7 @@ test('a person added on one phone reads on the other and takes Entries from both
   await miraContext.close()
 })
 
-test('a Settlement to a person with no phone is confirmed by its key holder', async ({
-  browser,
-}) => {
+test('a Settlement to a Shadow Member is confirmed by its key holder', async ({ browser }) => {
   const rohanContext = await browser.newContext(PHONE)
   const rohan = await rohanContext.newPage()
   await createGroup(rohan, 'Flat 3B', 'Rohan')
@@ -246,7 +244,7 @@ test('a Settlement to a person with no phone is confirmed by its key holder', as
   await rohanContext.close()
 })
 
-test('a claim against a person with no phone is confirmed by the holder', async ({ browser }) => {
+test('a claim against a Shadow Member is confirmed by the holder', async ({ browser }) => {
   const rohanContext = await browser.newContext(PHONE)
   const rohan = await rohanContext.newPage()
   const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
@@ -271,7 +269,7 @@ test('a claim against a person with no phone is confirmed by the holder', async 
   await form.getByRole('button', { name: 'Add settlement' }).click()
   await expect(settlements).toHaveCount(before + 1)
 
-  await expect(settlements).toContainText('Waiting for Rohit to confirm')
+  await expect(settlements).toContainText('Waiting for Rohan to confirm')
   await expect(mira.getByTestId('waiting-count')).toHaveText(
     '1 Settlement waiting for confirmation',
   )

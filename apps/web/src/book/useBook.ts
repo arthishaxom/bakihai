@@ -69,7 +69,7 @@ export interface BookView {
   loans: LoanState[]
   /** Settlement states folded from the book's Settlement and Confirm Entries. */
   settlements: SettlementState[]
-  /** The Settlements still waiting for their receiver's confirmation. */
+  /** The Settlements still waiting for the receiver's key to confirm. */
   settlementsAwaitingConfirmation: SettlementState[]
   /**
    * Each Member's Payment address, folded from their latest Payment address

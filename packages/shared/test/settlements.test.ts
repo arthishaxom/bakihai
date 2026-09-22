@@ -323,7 +323,7 @@ describe('foldSettlements', () => {
     expect(onlySettlement([...roster, settlement, fromBystander]).confirmed).toBe(false)
   })
 
-  it('confirms a Settlement to a person with no phone when its key holder wrote it', async () => {
+  it('confirms a Settlement to a Shadow Member when its key holder wrote it', async () => {
     const rohan = await makeDevice()
     const rohitId = uuidv7()
     const roster = [
@@ -360,7 +360,7 @@ describe('foldSettlements', () => {
     expect(foldSettlementsAwaitingConfirmation([...roster, settlement, confirmed])).toEqual([])
   })
 
-  it('ignores a Confirm for a person with no phone from a device that does not hold its key', async () => {
+  it('ignores a Confirm for a Shadow Member from a device that does not hold its key', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
     const kabir = await makeDevice()
