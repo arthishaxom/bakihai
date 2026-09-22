@@ -115,3 +115,29 @@ export async function openEntrySheet(page: Page, row: Locator): Promise<Locator>
 
   return sheet
 }
+
+/** Turns the Entries list's Show hidden toggle to `shown`, so Archived and Voided lines read. */
+export async function setShowHidden(page: Page, shown: boolean): Promise<void> {
+  const toggle = page.getByTestId('show-hidden')
+  const pressed = shown ? 'true' : 'false'
+
+  await expect(toggle).not.toHaveAttribute('aria-pressed', pressed)
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', pressed)
+}
+
+/** Picks one of the Entries list's filter chips, by its name in the ledger filters. */
+export async function filterEntries(page: Page, filter: string): Promise<void> {
+  const chip = page.getByTestId('ledger-filters').locator(`button[data-filter="${filter}"]`)
+
+  await chip.click()
+  await expect(chip).toHaveAttribute('aria-pressed', 'true')
+}
+
+/** The Entry types in a device's Entries list, in display order. */
+export function entryTypes(page: Page): Promise<string[]> {
+  return page
+    .getByTestId('entry-list')
+    .locator('li')
+    .evaluateAll((items) => items.map((item) => item.getAttribute('data-entry-type') ?? ''))
+}

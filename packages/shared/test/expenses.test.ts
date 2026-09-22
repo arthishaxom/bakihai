@@ -483,6 +483,107 @@ describe('foldExpenses', () => {
     expect(onlyExpense(admitted).settled).toBe(true)
   })
 
+  it('carries no settledAt while the Expense is open', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const dinner = await makeExpenseEntry(rohan, {
+      amountPaise: 90_000,
+      participantDeviceIds: [rohan.deviceId, mira.deviceId],
+      occurredAt: OCCURRED_AT,
+    })
+
+    expect(onlyExpense([dinner]).settledAt).toBeUndefined()
+  })
+
+  it('settles an Expense that owed nothing from the start at its own clock', async () => {
+    const rohan = await makeDevice()
+    const lunch = await makeExpenseEntry(rohan, {
+      amountPaise: 50_000,
+      participantDeviceIds: [rohan.deviceId],
+      occurredAt: OCCURRED_AT,
+    })
+
+    expect(onlyExpense([lunch])).toMatchObject({ settled: true, settledAt: OCCURRED_AT })
+  })
+
+  it('settles at the instant the last owed share was covered, not at the last Settlement', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const kabir = await makeDevice()
+    const dinner = await makeExpenseEntry(rohan, {
+      amountPaise: 90_000,
+      participantDeviceIds: [rohan.deviceId, mira.deviceId, kabir.deviceId],
+      occurredAt: '2026-09-20T10:00:00.000Z',
+    })
+    const miraPaid = await pay(mira, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: 30_000,
+      tag: { kind: 'expense', entryId: dinner.id },
+      occurredAt: '2026-09-21T10:00:00.000Z',
+    })
+    const kabirPaid = await pay(kabir, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: 30_000,
+      tag: { kind: 'expense', entryId: dinner.id },
+      occurredAt: '2026-09-22T10:00:00.000Z',
+    })
+
+    expect(onlyExpense([dinner, miraPaid, kabirPaid])).toMatchObject({
+      settled: true,
+      settledAt: '2026-09-22T10:00:00.000Z',
+    })
+    // The instant is a pure function of the Entries, so it does not move with
+    // the order the book happens to hold them in.
+    expect(foldExpenses([kabirPaid, dinner, miraPaid])).toEqual(
+      foldExpenses([dinner, miraPaid, kabirPaid]),
+    )
+  })
+
+  it('keeps the settling instant when a later Settlement arrives, even an overpayment', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const dinner = await makeExpenseEntry(rohan, {
+      amountPaise: 50_000,
+      participantDeviceIds: [mira.deviceId],
+      occurredAt: '2026-09-20T10:00:00.000Z',
+    })
+    const settled = await pay(mira, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: 50_000,
+      tag: { kind: 'expense', entryId: dinner.id },
+      occurredAt: '2026-09-21T10:00:00.000Z',
+    })
+    const extra = await pay(mira, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: 10_000,
+      tag: { kind: 'expense', entryId: dinner.id },
+      occurredAt: '2026-09-25T10:00:00.000Z',
+    })
+
+    expect(onlyExpense([dinner, settled, extra])).toMatchObject({
+      settled: true,
+      settledAt: '2026-09-21T10:00:00.000Z',
+    })
+  })
+
+  it('never settles an Expense before its own clock says it existed', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const dinner = await makeExpenseEntry(rohan, {
+      amountPaise: 50_000,
+      participantDeviceIds: [mira.deviceId],
+      occurredAt: '2026-09-20T10:00:00.000Z',
+    })
+    const paid = await pay(mira, {
+      toDeviceId: rohan.deviceId,
+      amountPaise: 50_000,
+      tag: { kind: 'expense', entryId: dinner.id },
+      occurredAt: '1970-01-01T00:00:00.000Z',
+    })
+
+    expect(onlyExpense([dinner, paid]).settledAt).toBe('2026-09-20T10:00:00.000Z')
+  })
+
   it('is empty for a book with no Expenses', async () => {
     const rohan = await makeDevice()
 

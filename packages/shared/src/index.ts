@@ -47,6 +47,12 @@ export {
   verifyEntryEnvelope,
 } from './entry-envelope'
 export { admitEntries } from './group/admission'
+export {
+  type ArchiveView,
+  archivedEntryIds,
+  hasArchived,
+  SETTLED_ARCHIVE_AFTER_DAYS,
+} from './group/archive'
 export { type Balance, foldBalances } from './group/balances'
 export {
   type CreateExpenseEntryInput,

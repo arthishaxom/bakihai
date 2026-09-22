@@ -7,6 +7,7 @@ import {
   memberNames,
   openAddSheet,
   openEntrySheet,
+  setShowHidden,
 } from './helpers'
 
 // Every test runs at a phone viewport: the detail sheet is a mobile surface.
@@ -72,6 +73,13 @@ test('an Expense is Voided from its bottom sheet and the Balance clears on both 
   await sheet.getByRole('button', { name: 'Void entry' }).click()
   await expect(rohan.getByRole('dialog')).toHaveCount(0)
 
+  // The correction goes quiet: neither the Void nor the Expense it Voided is in
+  // the active list until Show hidden asks for them.
+  await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(0)
+  await expect(rohan.locator('li[data-voided="true"]')).toHaveCount(0)
+
+  await setShowHidden(rohan, true)
+
   // Both lines stay in the book: the Void line, and the Expense struck
   // through and annotated with who Voided it and why.
   await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(2)
@@ -83,13 +91,16 @@ test('an Expense is Voided from its bottom sheet and the Balance clears on both 
   await expect(struck).toContainText('Voided by Rohan — wrong amount')
   await expect(struck.locator('span').first()).toHaveCSS('text-decoration-line', 'line-through')
 
-  // The Balance it moved is gone on both phones.
+  // The Balance it moved is gone on both phones — hidden lines never move money.
   await expect.poll(() => balanceTexts(rohan)).toEqual([])
   await expect.poll(() => balanceTexts(mira)).toEqual([])
   await expect(rohan.getByTestId('no-balances')).toBeVisible()
   await expect(mira.getByTestId('no-balances')).toBeVisible()
 
-  // Mira sees the same struck-through line and the voider's name and reason.
+  // Mira's phone hides the pair too, and shows the same struck-through line and
+  // the voider's name and reason once she asks for it.
+  await expect(mira.getByTestId('entry-list').locator('li')).toHaveCount(0)
+  await setShowHidden(mira, true)
   await expect(mira.locator('li[data-voided="true"]')).toContainText(
     'Voided by Rohan — wrong amount',
   )
@@ -116,6 +127,12 @@ test('a Void, a voided Entry, and a Member Entry offer no Void action', async ({
 
   await sheet.getByRole('button', { name: 'Void entry' }).click()
   await expect(rohan.getByRole('dialog')).toHaveCount(0)
+
+  // The pair is quiet by default; Show hidden is what brings the Void's own
+  // line back for inspection.
+  await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(0)
+
+  await setShowHidden(rohan, true)
 
   // The Void's own line opens a sheet that names what it Voided and offers
   // no Void action of its own.
@@ -172,16 +189,20 @@ test('a Void recorded offline converges and stops counting on both devices', asy
   await sheet.getByRole('button', { name: 'Void entry' }).click()
   await expect(rohan.getByRole('dialog')).toHaveCount(0)
 
-  // The correction holds on the phone that made it; Mira's copy has not heard.
+  // The correction holds on the phone that made it, where the pair is already
+  // quiet. Mira's copy has not heard, so her active list still shows the Expense.
   await expect.poll(() => balanceTexts(rohan)).toEqual([])
   await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohan ₹450'])
-  await expect(mira.locator('li[data-voided="true"]')).toHaveCount(0)
+  await expect(rohan.getByTestId('entry-list').locator('li')).toHaveCount(0)
+  await expect(mira.getByTestId('entry-list').locator('li')).toHaveCount(1)
 
   // Back online: the Void reaches Mira and the target stops counting there too.
   await rohanContext.setOffline(false)
   await miraContext.setOffline(false)
 
   await expect.poll(() => balanceTexts(mira), { timeout: 15_000 }).toEqual([])
+  await expect.poll(() => mira.getByTestId('entry-list').locator('li').count()).toBe(0)
+  await setShowHidden(mira, true)
   await expect(mira.locator('li[data-voided="true"]')).toContainText(
     'Voided by Rohan — offline correction',
   )

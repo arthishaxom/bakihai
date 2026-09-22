@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { compareText } from '../compare'
+import { compareText, laterText } from '../compare'
 import { ENTRY_SCHEMA_VERSION, type EntryEnvelope, signEntryEnvelope } from '../entry-envelope'
 import { uuidv7 } from '../uuidv7'
 import { foldVoids } from './voids'
@@ -189,18 +189,60 @@ export interface LoanState {
   overReturnedByHundredths: number
   /** Nothing left outstanding. An over-returned Loan is settled and marked. */
   settled: boolean
+  /**
+   * When the Loan became Settled, on the Entry clocks: the first Return after
+   * which nothing was outstanding, or the Loan's own `occurredAt` when it never
+   * needed one. Absent while it is open. The archive deadline reads this; it is
+   * computed, never stored (ADR-0005).
+   */
+  settledAt?: string
+}
+
+/**
+ * When a Loan became Settled: the crossing point of its Returns, read from the
+ * Entry clocks. Returns only ever add up, so the instant the Loan settled is
+ * the `occurredAt` of the first Return whose cumulative quantity covered the
+ * Loan — every earlier Return was already there, and a later one, even an
+ * over-return, cannot make it unsettled again. An over-returned Loan settled at
+ * that same first crossing. Ties break on Entry id so every device picks the
+ * same instant.
+ */
+function loanSettledAt(
+  entry: EntryEnvelope,
+  quantityHundredths: number,
+  returns: LoanReturn[],
+): string | undefined {
+  const ordered = [...returns].sort(
+    (left, right) =>
+      compareText(left.entry.occurredAt, right.entry.occurredAt) ||
+      compareText(left.entry.id, right.entry.id),
+  )
+  let returnedHundredths = 0
+
+  for (const returned of ordered) {
+    returnedHundredths += returned.quantityHundredths
+
+    if (returnedHundredths >= quantityHundredths) {
+      // A Loan cannot have settled before it existed, however the clocks read.
+      return laterText(entry.occurredAt, returned.entry.occurredAt)
+    }
+  }
+
+  return undefined
 }
 
 /**
  * Folds the book's Loan and Return Entries into item states (ADR-0006): a
  * Loan's remaining quantity is its quantity minus the sum of its Returns,
  * clamped at zero, so two offline Returns that together exceed the quantity
- * fold to zero with an over-returned marker instead of a negative remainder.
- * The result is a pure function of the Entries — the same book folds the same
- * items in any order, on any clock — and Voided Entries drop out entirely, so
- * a Voided Loan takes its Returns with it and a Voided Return reopens what it
- * had closed (ADR-0005). Entries this version cannot read, and Returns whose
- * Loan is not in the book, are ignored rather than misread.
+ * fold to zero with an over-returned marker instead of a negative remainder. A
+ * Settled Loan also carries the instant it settled, so the archive deadline is
+ * computed rather than stored (ADR-0005). The result is a pure function of the
+ * Entries — the same book folds the same items in any order, on any clock — and
+ * Voided Entries drop out entirely, so a Voided Loan takes its Returns with it
+ * and a Voided Return reopens what it had closed (ADR-0005). Entries this
+ * version cannot read, and Returns whose Loan is not in the book, are ignored
+ * rather than misread.
  */
 export function foldLoans(entries: EntryEnvelope[]): LoanState[] {
   const voidedByTarget = foldVoids(entries)
@@ -253,6 +295,10 @@ export function foldLoans(entries: EntryEnvelope[]): LoanState[] {
         0,
       )
       const remainingHundredths = Math.max(0, payload.quantityHundredths - returnedHundredths)
+      const settled = remainingHundredths === 0
+      const settledAt = settled
+        ? loanSettledAt(entry, payload.quantityHundredths, returns)
+        : undefined
 
       return {
         loanEntryId: entry.id,
@@ -266,7 +312,8 @@ export function foldLoans(entries: EntryEnvelope[]): LoanState[] {
         returnedHundredths,
         remainingHundredths,
         overReturnedByHundredths: Math.max(0, returnedHundredths - payload.quantityHundredths),
-        settled: remainingHundredths === 0,
+        settled,
+        ...(settledAt === undefined ? {} : { settledAt }),
       }
     })
     .sort((left, right) => compareText(left.loanEntryId, right.loanEntryId))

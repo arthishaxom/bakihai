@@ -402,6 +402,75 @@ describe('foldLoans', () => {
     expect(onlyLoan(admitted).remainingHundredths).toBe(150)
   })
 
+  it('carries no settledAt while the Loan is open', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const loan = await lend(rohan, {
+      itemLabel: 'eggs',
+      quantityHundredths: 300,
+      borrowerDeviceId: mira.deviceId,
+      occurredAt: '2026-09-20T10:00:00.000Z',
+    })
+    const half = await recordReturn(mira, loan.id, 150, '2026-09-21T10:00:00.000Z')
+
+    expect(onlyLoan([loan, half])).toMatchObject({ settled: false })
+    expect(onlyLoan([loan, half]).settledAt).toBeUndefined()
+  })
+
+  it('settles at the instant the last Return covered the Loan, not at the last Return', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const loan = await lend(rohan, {
+      itemLabel: 'rice',
+      quantityHundredths: 400,
+      borrowerDeviceId: mira.deviceId,
+      occurredAt: '2026-09-20T10:00:00.000Z',
+    })
+    const first = await recordReturn(mira, loan.id, 150, '2026-09-21T10:00:00.000Z')
+    const second = await recordReturn(mira, loan.id, 250, '2026-09-22T10:00:00.000Z')
+
+    expect(onlyLoan([loan, first, second])).toMatchObject({
+      settled: true,
+      settledAt: '2026-09-22T10:00:00.000Z',
+    })
+    // The instant is a pure function of the Entries, so it does not move with
+    // the order the book happens to hold them in.
+    expect(foldLoans([second, loan, first])).toEqual(foldLoans([loan, first, second]))
+  })
+
+  it('keeps the settling instant when an over-return lands later', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const loan = await lend(rohan, {
+      itemLabel: 'rice',
+      quantityHundredths: 400,
+      borrowerDeviceId: mira.deviceId,
+      occurredAt: '2026-09-20T10:00:00.000Z',
+    })
+    const settling = await recordReturn(mira, loan.id, 400, '2026-09-21T10:00:00.000Z')
+    const past = await recordReturn(mira, loan.id, 100, '2026-09-25T10:00:00.000Z')
+
+    expect(onlyLoan([loan, settling, past])).toMatchObject({
+      overReturnedByHundredths: 100,
+      settled: true,
+      settledAt: '2026-09-21T10:00:00.000Z',
+    })
+  })
+
+  it('never settles a Loan before its own clock says it existed', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const loan = await lend(rohan, {
+      itemLabel: 'eggs',
+      quantityHundredths: 300,
+      borrowerDeviceId: mira.deviceId,
+      occurredAt: '2026-09-20T10:00:00.000Z',
+    })
+    const returned = await recordReturn(mira, loan.id, 300, '1970-01-01T00:00:00.000Z')
+
+    expect(onlyLoan([loan, returned]).settledAt).toBe('2026-09-20T10:00:00.000Z')
+  })
+
   it('is empty for a book with no Loans', async () => {
     const rohan = await makeDevice()
 

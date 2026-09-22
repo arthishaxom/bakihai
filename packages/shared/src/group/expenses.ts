@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { compareText } from '../compare'
+import { compareText, laterText } from '../compare'
 import { ENTRY_SCHEMA_VERSION, type EntryEnvelope, signEntryEnvelope } from '../entry-envelope'
 import { uuidv7 } from '../uuidv7'
 import { foldSettlements, type SettlementState } from './settlements'
@@ -138,6 +138,56 @@ export interface ExpenseState {
   coveredPaise: number
   /** True when every participant who owes the payer is covered. */
   settled: boolean
+  /**
+   * When the Expense became Settled, on the Entry clocks: the first contributing
+   * Settlement after which every share was covered, or the Expense's own
+   * `occurredAt` when it owed nothing from the start. Absent while it is open.
+   * The archive deadline reads this; it is computed, never stored (ADR-0005).
+   */
+  settledAt?: string
+}
+
+/**
+ * When an Expense became Settled: the crossing point of its coverage, read from
+ * the Entry clocks. Coverage only grows as tagged Settlements are appended, so
+ * the instant it settled is the `occurredAt` of the first contributing
+ * Settlement after which every participant who owes the payer is covered —
+ * every earlier Settlement was already there, and no later one can take it
+ * back. An Expense that owed nothing (the payer was its only participant) was
+ * Settled from its own `occurredAt`, and an Expense is never Settled before it
+ * existed, however the clocks read. Ties break on Entry id so every device
+ * picks the same instant.
+ */
+function expenseSettledAt(entry: EntryEnvelope, coverage: ExpenseCoverage[]): string | undefined {
+  if (coverage.length === 0) {
+    return entry.occurredAt
+  }
+
+  const contributing = coverage
+    .flatMap((line) => line.settlements)
+    .sort(
+      (left, right) =>
+        compareText(left.entry.occurredAt, right.entry.occurredAt) ||
+        compareText(left.settlementEntryId, right.settlementEntryId),
+    )
+  const paidByDevice = new Map<string, number>()
+
+  for (const settlement of contributing) {
+    paidByDevice.set(
+      settlement.fromDeviceId,
+      (paidByDevice.get(settlement.fromDeviceId) ?? 0) + settlement.amountPaise,
+    )
+
+    const everyShareCovered = coverage.every(
+      (line) => (paidByDevice.get(line.deviceId) ?? 0) >= line.sharePaise,
+    )
+
+    if (everyShareCovered) {
+      return laterText(entry.occurredAt, settlement.entry.occurredAt)
+    }
+  }
+
+  return undefined
 }
 
 /**
@@ -151,10 +201,11 @@ export interface ExpenseState {
  * the moment it is appended, exactly as it counts toward the Balance
  * (ADR-0007); Voiding a tagged Settlement reopens what it had covered, and a
  * Voided Expense drops out with them (ADR-0005). A participant who overpays is
- * covered, not credited: coverage is clamped at the share. The result is a
- * pure function of the Entries — the same book folds the same coverage in any
- * order, on any clock — and Entries this version cannot read are ignored
- * rather than misread.
+ * covered, not credited: coverage is clamped at the share. A Settled Expense
+ * also carries the instant it settled, so the archive deadline is computed
+ * rather than stored (ADR-0005). The result is a pure function of the Entries —
+ * the same book folds the same coverage in any order, on any clock — and
+ * Entries this version cannot read are ignored rather than misread.
  */
 export function foldExpenses(entries: EntryEnvelope[]): ExpenseState[] {
   const voidedByTarget = foldVoids(entries)
@@ -210,6 +261,8 @@ export function foldExpenses(entries: EntryEnvelope[]): ExpenseState[] {
       })
     const owedPaise = coverage.reduce((total, line) => total + line.sharePaise, 0)
     const coveredPaise = coverage.reduce((total, line) => total + line.coveredPaise, 0)
+    const settled = coveredPaise >= owedPaise
+    const settledAt = settled ? expenseSettledAt(entry, coverage) : undefined
 
     expenses.push({
       expenseEntryId: entry.id,
@@ -221,7 +274,8 @@ export function foldExpenses(entries: EntryEnvelope[]): ExpenseState[] {
       coverage,
       owedPaise,
       coveredPaise,
-      settled: coveredPaise >= owedPaise,
+      settled,
+      ...(settledAt === undefined ? {} : { settledAt }),
     })
   }
 

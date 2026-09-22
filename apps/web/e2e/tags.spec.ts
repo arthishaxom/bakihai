@@ -10,6 +10,7 @@ import {
   openLoanForm,
   openSettlementForm,
   openSettleUp,
+  setShowHidden,
 } from './helpers'
 
 // Every test runs at a phone viewport: the sheets are mobile surfaces.
@@ -264,6 +265,8 @@ test('Voiding a tagged Settlement reopens the Expense coverage on both phones', 
   await expect.poll(() => entryRow(mira, 'expense').textContent()).not.toContain('Settled')
 
   // The Voided Settlement's own sheet still names the tag it carried.
+  await setShowHidden(rohan, true)
+
   const voidedDetail = await openEntrySheet(rohan, rohan.locator('li[data-voided="true"]'))
 
   await expect(voidedDetail.getByTestId('settlement-tag')).toContainText(

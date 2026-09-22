@@ -9,6 +9,7 @@ import {
   openEntrySheet,
   openSettlementForm,
   openSettleUp,
+  setShowHidden,
 } from './helpers'
 
 // Every test runs at a phone viewport: the Settlement surfaces are mobile sheets.
@@ -324,9 +325,13 @@ test('Voiding a Settlement puts the Balance back on both phones', async ({ brows
 
   const struck = rohan.locator('li[data-voided="true"]')
 
+  await setShowHidden(rohan, true)
+
   await expect(struck).toContainText('Mira paid Rohan ₹450')
   await expect(struck).toContainText('Voided by Rohan — never arrived')
   await expect(entryRow(rohan, 'void')).toContainText('Rohan voided “Mira paid Rohan ₹450”')
+
+  await setShowHidden(mira, true)
   await expect(mira.locator('li[data-voided="true"]')).toContainText(
     'Voided by Rohan — never arrived',
   )

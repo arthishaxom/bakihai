@@ -1,4 +1,5 @@
 import {
+  archivedEntryIds,
   type Balance,
   buildInviteUrl,
   type EntryEnvelope,
@@ -15,6 +16,14 @@ import {
 import { useMemo, useState } from 'react'
 import { AddEntrySheet } from '../book/AddEntrySheet'
 import { EntryDetailSheet } from '../book/EntryDetailSheet'
+import {
+  LEDGER_FILTER_LABELS,
+  LEDGER_FILTERS,
+  type LedgerFilter,
+  loadLedgerFilter,
+  saveLedgerFilter,
+  visibleLedgerEntries,
+} from '../book/ledger'
 import { PaymentAddressSheet } from '../book/PaymentAddressSheet'
 import { SettleUpSheet } from '../book/SettleUpSheet'
 import {
@@ -44,11 +53,20 @@ function compareTextDesc(left: string, right: string): number {
   return left > right ? -1 : 0
 }
 
+/** The pill styling a filter chip or the Show hidden toggle carries, lit when on. */
+function pillClasses(active: boolean): string {
+  return `min-h-11 rounded-full border px-3 py-2 text-sm ${
+    active ? 'border-foreground bg-foreground text-background' : 'border-foreground/20'
+  }`
+}
+
 /**
  * The book of the Group this device belongs to: its Members, its Balances, the
- * Add bottom sheet, its Entries newest first, and the invite action. Everything
- * is read from the local copy, so the screen is instant with no network
- * (ADR-0001) and Balances are folded, never stored (ADR-0004).
+ * Add bottom sheet, its Entries newest first behind filter chips, and the invite
+ * action. The list starts quiet — Settled items past their 14-day deadline and
+ * Void pairs wait behind Show hidden, which hides nothing from the arithmetic
+ * (ADR-0005). Everything is read from the local copy, so the screen is instant
+ * with no network (ADR-0001) and Balances are folded, never stored (ADR-0004).
  */
 export function BookPage() {
   const [identity] = useState(loadIdentity)
@@ -89,6 +107,14 @@ function BookScreen({ identity }: { identity: Identity }) {
   const [addressOpen, setAddressOpen] = useState(false)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [settlingBalance, setSettlingBalance] = useState<Balance | null>(null)
+  // The chosen chip is a device preference and survives a reload; Show hidden is
+  // view state for this visit, so a fresh look at the book starts quiet.
+  const [filter, setFilter] = useState<LedgerFilter>(loadLedgerFilter)
+  const [showHidden, setShowHidden] = useState(false)
+  // The archive deadline is read when the book opens, not ticked: nothing here
+  // needs a timer, and reopening the book recomputes every deadline from the
+  // Entries. A phone left on this screen across a deadline catches it next visit.
+  const [now] = useState(() => new Date())
   // useBook hands over only accepted Entries, so the ledger leaves out the
   // Member Entries that announce the roster itself and the Payment address
   // Entries that live on the Members rows, and orders the rest newest first.
@@ -104,6 +130,25 @@ function BookScreen({ identity }: { identity: Identity }) {
             compareTextDesc(left.id, right.id),
         ),
     [entries],
+  )
+  // The lines the active list hides: Settled items past their 14-day deadline,
+  // with the Returns and tagged Settlements that belong to them. Nothing else in
+  // the book reads this set, so hiding never moves a Balance (ADR-0005).
+  const archivedIds = useMemo(
+    () => archivedEntryIds({ expenses, loans, settlements, now }),
+    [expenses, loans, settlements, now],
+  )
+  // The ledger after the chips and Show hidden: what the Entries list renders.
+  const visibleEntries = useMemo(
+    () =>
+      visibleLedgerEntries({
+        entries: ledgerEntries,
+        voidsByTargetId,
+        archivedEntryIds: archivedIds,
+        filter,
+        showHidden,
+      }),
+    [ledgerEntries, voidsByTargetId, archivedIds, filter, showHidden],
   )
   const memberIds = useMemo(() => new Set(members.map((member) => member.deviceId)), [members])
   // Balances are between Members: an accepted Entry can still name someone who
@@ -231,6 +276,11 @@ function BookScreen({ identity }: { identity: Identity }) {
     setSelectedEntryId(entry.id)
   }
 
+  function chooseFilter(next: LedgerFilter): void {
+    setFilter(next)
+    saveLedgerFilter(next)
+  }
+
   async function copyInvite(): Promise<void> {
     try {
       await navigator.clipboard.writeText(inviteUrl)
@@ -354,45 +404,78 @@ function BookScreen({ identity }: { identity: Identity }) {
         <h2 id="entries-heading" className="font-semibold text-lg">
           Entries
         </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <fieldset data-testid="ledger-filters" className="flex flex-wrap gap-2 border-0 p-0">
+            <legend className="sr-only">Filter entries</legend>
+            {LEDGER_FILTERS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                data-filter={option}
+                aria-pressed={filter === option}
+                onClick={() => chooseFilter(option)}
+                className={pillClasses(filter === option)}
+              >
+                {LEDGER_FILTER_LABELS[option]}
+              </button>
+            ))}
+          </fieldset>
+          <button
+            type="button"
+            data-testid="show-hidden"
+            aria-pressed={showHidden}
+            onClick={() => setShowHidden((shown) => !shown)}
+            className={pillClasses(showHidden)}
+          >
+            Show hidden
+          </button>
+        </div>
         {ledgerEntries.length > 0 ? (
-          <ul data-testid="entry-list" className="flex flex-col gap-1">
-            {ledgerEntries.map((entry) => {
-              const voidEntry = voidsByTargetId.get(entry.id)
-              const settlement = narratives.get(entry.id)?.settlement
+          <>
+            <ul data-testid="entry-list" className="flex flex-col gap-1">
+              {visibleEntries.map((entry) => {
+                const voidEntry = voidsByTargetId.get(entry.id)
+                const settlement = narratives.get(entry.id)?.settlement
 
-              return (
-                <li
-                  key={entry.id}
-                  data-entry-id={entry.id}
-                  data-entry-type={entry.type}
-                  data-voided={voidEntry ? 'true' : undefined}
-                >
-                  <button
-                    type="button"
-                    onClick={() => openEntry(entry)}
-                    className="flex min-h-11 w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left"
+                return (
+                  <li
+                    key={entry.id}
+                    data-entry-id={entry.id}
+                    data-entry-type={entry.type}
+                    data-voided={voidEntry ? 'true' : undefined}
                   >
-                    <span className={voidEntry ? 'line-through' : 'font-medium'}>
-                      {describeEntry(entry, members, narratives.get(entry.id))}
-                    </span>
-                    {voidEntry ? (
-                      <span className="text-muted-foreground text-sm">
-                        {describeVoidedBy(voidEntry, members)}
+                    <button
+                      type="button"
+                      onClick={() => openEntry(entry)}
+                      className="flex min-h-11 w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left"
+                    >
+                      <span className={voidEntry ? 'line-through' : 'font-medium'}>
+                        {describeEntry(entry, members, narratives.get(entry.id))}
                       </span>
-                    ) : null}
-                    {settlement && !settlement.confirmed ? (
+                      {voidEntry ? (
+                        <span className="text-muted-foreground text-sm">
+                          {describeVoidedBy(voidEntry, members)}
+                        </span>
+                      ) : null}
+                      {settlement && !settlement.confirmed ? (
+                        <span className="text-muted-foreground text-sm">
+                          {describeSettlementStatus(settlement, members)}
+                        </span>
+                      ) : null}
                       <span className="text-muted-foreground text-sm">
-                        {describeSettlementStatus(settlement, members)}
+                        {formatOccurredAt(entry.occurredAt)}
                       </span>
-                    ) : null}
-                    <span className="text-muted-foreground text-sm">
-                      {formatOccurredAt(entry.occurredAt)}
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+            {visibleEntries.length === 0 ? (
+              <p data-testid="no-visible-entries" className="text-muted-foreground">
+                Nothing matches. Try another filter, or turn on Show hidden.
+              </p>
+            ) : null}
+          </>
         ) : ready ? (
           <p className="text-muted-foreground">No entries yet. Add the first one above.</p>
         ) : null}

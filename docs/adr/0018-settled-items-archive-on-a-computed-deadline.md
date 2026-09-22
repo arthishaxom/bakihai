@@ -1,0 +1,19 @@
+# Settled items archive 14 days after they became Settled, and the deadline is computed from the Entries
+
+An Expense or Loan leaves the active Entries list 14 days after it became Settled. The instant it settled is folded from the Entry clocks rather than stored: it is the first contributing Settlement, or Return, after which nothing was owed — every earlier one was already in the book, and a later one, even an over-return or an overpayment, cannot unsettle it again. An item that owed nothing from the start (an Expense whose payer was its only participant) settled at its own `occurredAt`, and no item is ever Settled before it existed, however the clocks read. Open items never hide, at any age. The deadline math takes `now` explicitly, so every device computes the same answer and tests can move the clock; a device reading an Entry whose `occurredAt` will not parse keeps that line visible rather than hiding it on a guess.
+
+A line archives with the item it belongs to: a Loan takes its Returns, an Expense or Loan takes the Settlements tagged to it, and those Settlements take their Confirms. An untagged Settlement belongs to no item, is a self-contained record of money that moved, and never archives on its own. A Void pair — the Void and the Entry it Voided — is hidden by the Void rule instead, and hides immediately rather than on a deadline.
+
+## Considered Options
+
+- **The latest contributing payment's clock** — one extra payment tagged to an already-settled item would push its deadline out and un-hide it, so a closed item could reappear because someone overpaid it.
+- **Storing `settledAt` on the Entry when it settles** — nothing may be written back to an Entry (ADR-0001), and a stored instant would have to be agreed by every device at the moment of settling; the crossing point is derivable by anyone holding the book.
+- **Archiving only the Expense or Loan line** — a Return names no item or counterparty on its own and a tagged Settlement's item would be gone, so the revealed history would read as fragments. Archiving the whole item keeps one story together.
+- **Archiving untagged Settlements too** — a payment with no tag closes no item, so there is no item state to derive a deadline from; the Balance it moved is still real and its line still reads on its own.
+- **Hiding by `occurredAt` age rather than by Settled state** — an open debt would silently vanish from the active list, which is the one thing the deadline must never do.
+
+## Consequences
+
+The active list stays readable without anything leaving the book: Show hidden brings every Archived and Voided line back, Voided ones struck through. Balances and item states fold the whole book and never read the archive set, so hiding changes what the book shows and never what it says. The 14 days is a constant, not a per-Group setting; the setting and manual archive wait for P3 (ADR-0005). A Settlement still waiting for its receiver's confirmation keeps its place in the count beside Balances even after the item it pays off has Archived, so an unresolved claim is never buried behind a toggle. Because the deadline is computed from `occurredAt`, a device with a badly skewed clock shifts its own view by that skew — the same trust the book already places in Entry clocks for display order (ADR-0012).
+
+Two edges follow from archiving by the fold's state rather than by a stored flag. A Voided item leaves the fold, so the Settlements tagged to it are no longer tagged to anything Archived and come back to the active list — which is right, because they are live payments again and they still move the Balance, and the item itself is hidden as a Void pair. And only the Confirm the fold credits Archives with its Settlement, since `foldSettlements` keeps one Confirm per Settlement; a receiver's duplicate Confirm would stay visible, but the book's own Confirm action is offered once and only to the receiver, so that costs a stray line rather than a wrong Balance.

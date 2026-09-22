@@ -7,6 +7,7 @@ import {
   openAddSheet,
   openEntrySheet,
   openLoanForm,
+  setShowHidden,
 } from './helpers'
 
 // Every test runs at a phone viewport: the sheets are mobile surfaces.
@@ -243,6 +244,8 @@ test('voiding a Loan keeps both lines and names the item on both phones', async 
   await sheet.getByRole('button', { name: 'Void entry' }).click()
   await expect(rohan.getByRole('dialog')).toHaveCount(0)
 
+  await setShowHidden(rohan, true)
+
   // The Loan line stays, struck through, and both the line and the Void name
   // the item rather than the Entry type.
   const struck = rohan.locator('li[data-voided="true"]')
@@ -260,7 +263,8 @@ test('voiding a Loan keeps both lines and names the item on both phones', async 
   await rohan.keyboard.press('Escape')
   await expect(rohan.getByRole('dialog')).toHaveCount(0)
 
-  // Mira reads the same two lines.
+  // Mira reads the same two lines once she asks for them.
+  await setShowHidden(mira, true)
   await expect(mira.locator('li[data-voided="true"]')).toContainText('Rohan lent 3 eggs to Mira')
   await expect(mira.locator('li[data-entry-type="void"]')).toContainText(
     'Rohan voided “Rohan lent 3 eggs to Mira”',
