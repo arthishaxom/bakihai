@@ -26,3 +26,26 @@ export function uuidv7(now: number = Date.now()): string {
 
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
+
+/**
+ * The millisecond timestamp a UUIDv7 carries in its first 48 bits: the sort
+ * key that entry id order reads (ADR-0012, ADR-0020).
+ */
+export function uuidv7Timestamp(id: string): number {
+  const timestamp = Number.parseInt(`${id.slice(0, 8)}${id.slice(9, 13)}`, 16)
+
+  if (!Number.isSafeInteger(timestamp)) {
+    throw new RangeError(`Not a UUIDv7: ${id}`)
+  }
+
+  return timestamp
+}
+
+/**
+ * Mints a UUIDv7 that sorts after `id` whatever the clock says. For an Entry
+ * that must outrank another by id order, not by when it was actually minted:
+ * a Shadow Member's Entry after the Entry that binds its holder (ADR-0020).
+ */
+export function uuidv7After(id: string, now: number = Date.now()): string {
+  return uuidv7(Math.max(now, uuidv7Timestamp(id) + 1))
+}

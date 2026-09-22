@@ -83,8 +83,8 @@ interface EntryDetailSheetProps {
    * only when its receiver has one (ADR-0017).
    */
   paymentAddresses: ReadonlyMap<string, PaymentAddress>
-  /** This device's Member identity, so whoever holds the receiver's key is offered a Confirm. */
-  viewer: Pick<Member, 'deviceId' | 'displayName'>
+  /** This device's Member identity, so the key that binds the receiver's id is offered a Confirm (ADR-0021). */
+  viewer: Pick<Member, 'deviceId' | 'displayName' | 'signerPublicKey'>
   members: Member[]
   /**
    * The Member holding each Shadow Member's key (ADR-0020), so a claim against
@@ -184,16 +184,19 @@ export function EntryDetailSheet({
   // Coverage acts on the Expense itself: a Voided Expense, and the Expense row
   // of a Settlement, offer no share to settle.
   const outstandingExpense = entry.type === EXPENSE_ENTRY_TYPE && !voidedBy ? expense : undefined
-  // Only the Member holding the receiver's key can attest to a claim, and only
-  // while the claim is unconfirmed and the Settlement not Voided (ADR-0021).
-  const receiverHolderId =
+  // Only the Member whose key binds the receiver's id can attest to a claim
+  // (ADR-0021). The gate reads that binding — the same rule the Settlement
+  // fold applies — rather than the roster's holder classification, so id order
+  // that has inverted a Shadow Member and its holder cannot withhold a Confirm
+  // the fold would accept (#27).
+  const receiverKey =
     settlement === undefined
       ? undefined
-      : (shadowHolders.get(settlement.toDeviceId) ?? settlement.toDeviceId)
+      : members.find((member) => member.deviceId === settlement.toDeviceId)?.signerPublicKey
   const canConfirm =
     settlement !== undefined &&
     !settlement.confirmed &&
-    receiverHolderId === viewer.deviceId &&
+    receiverKey === viewer.signerPublicKey &&
     !voidedBy
   // A Voided Settlement reads its tag from its own payload; a live one from the fold.
   const settlementTag = settlementTagOf(entry, settlement)

@@ -3,11 +3,15 @@ import {
   addShadowMember,
   balanceTexts,
   createGroup,
+  entryRow,
   type InvitePayload,
   invitePayload,
   joinGroup,
   memberNames,
+  memberRow,
   openAddSheet,
+  openEntrySheet,
+  openSettlementForm,
 } from './helpers'
 
 const HARNESS_PATH = '/e2e/harness/harness.html'
@@ -619,6 +623,74 @@ test('a forged Shadow Member claim and a forged Entry as the shadow never reach 
 
   await rohanContext.close()
   await miraContext.close()
+})
+
+test('a Settlement to an inverted Shadow Member is still confirmed by the key holder', async ({
+  browser,
+}) => {
+  const rohanContext = await browser.newContext()
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+  const group = invitePayload(invite)
+  const harness = await openHarness(rohanContext, group)
+
+  // A modified client mints both Member Entries under one key, the person's id
+  // before the phone's, so the holder fold names Rohit the phone and Mira —
+  // a real phone — his Shadow Member (#27).
+  const phone = await harness.evaluate(() =>
+    window.harness.addInvertedHolderPair({ deviceName: 'Mira', personName: 'Rohit' }),
+  )
+  await expect
+    .poll(async () => (await memberNames(rohan)).sort())
+    .toEqual(['Mira', 'Rohan', 'Rohit'])
+  await expect(memberRow(rohan, 'Mira')).toContainText('No phone · Added by Rohit')
+
+  // Mira's phone opens as the identity the pair was signed under.
+  const miraContext = await browser.newContext()
+  await miraContext.addInitScript(
+    (identity) => {
+      localStorage.setItem('bakihai/identity', JSON.stringify(identity))
+    },
+    {
+      version: 1,
+      groupId: group.room,
+      groupName: group.name,
+      relayUrl: group.relay,
+      groupKey: group.key,
+      deviceId: phone.deviceId,
+      displayName: 'Mira',
+      signerPublicKey: phone.signerPublicKey,
+      privateKeyPkcs8: phone.privateKeyPkcs8,
+    },
+  )
+  const mira = await miraContext.newPage()
+  await mira.goto('/')
+  await expect(mira.getByTestId('member-list')).toContainText('Mira')
+
+  // Rohan records "I paid Mira ₹100": a claim only her key can attest to.
+  const form = await openSettlementForm(rohan)
+
+  await form.getByLabel('Member').selectOption({ label: 'Mira' })
+  await form.getByLabel('Amount (₹)').fill('100')
+  await form.getByRole('button', { name: 'Add settlement' }).click()
+  await expect(entryRow(rohan, 'settlement')).toContainText('Waiting for Rohit to confirm')
+
+  // The holder name is the fold's guess from id order; who can attest is the
+  // key rule (ADR-0021), so Mira's phone offers the Confirm all the same.
+  const sheet = await openEntrySheet(mira, entryRow(mira, 'settlement'))
+
+  await expect(sheet.getByTestId('settlement-status')).toHaveText('Waiting for Rohit to confirm')
+  await expect(sheet.getByTestId('confirm-settlement')).toBeVisible()
+  await sheet.getByTestId('confirm-settlement').click()
+  await expect(mira.getByRole('dialog')).toHaveCount(0)
+
+  // Confirming clears the wait everywhere: the fold takes her key, as it says.
+  await expect.poll(() => rohan.getByTestId('waiting-count').count()).toBe(0)
+  await expect(entryRow(rohan, 'settlement')).not.toContainText('Waiting for')
+  await expect(entryRow(rohan, 'settlement-confirm')).toContainText('Mira confirmed')
+
+  await miraContext.close()
+  await rohanContext.close()
 })
 
 test('absurd Entries naming a Shadow Member never blank a phone', async ({ browser }) => {

@@ -10,7 +10,7 @@ A Settlement counts from the moment it is appended (ADR-0007), and ADR-0015 conf
 
 ## Consequences
 
-- The Confirm action belongs to the Member whose key binds the receiver's id; a Settlement the holder records to their own shadow starts confirmed.
+- The Confirm action belongs to the Member whose key binds the receiver's id — the app reads that binding, not the roster's holder classification, so even a pair inverted by id order (ADR-0020) is offered the Confirm — and a Settlement the holder records to their own shadow starts confirmed.
 - No phantom wait: a Settlement naming a shadow is never presented as the shadow's to confirm.
 - If the holder's phone is wiped, attestation for their shadow ends with it: Settlements to the shadow still count toward the Balance, but stay unconfirmed. Recovery belongs to the deferred handover work (ADR-0020).
 - A Member can attest only for their own id and the ids they added; their key binds nothing else.

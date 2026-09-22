@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ENTRY_SCHEMA_VERSION,
   type EntryEnvelope,
@@ -277,5 +277,40 @@ describe('foldShadowHolders', () => {
 
     expect(foldShadowHolders(entries)).toEqual(new Map())
     expect(foldMemberKeys(entries)).toEqual(new Map([[rohan.deviceId, rohan.signerPublicKey]]))
+  })
+})
+
+describe('createMemberEntry for a person without the app', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('mints the shadow after this device even when the clock moves backwards', async () => {
+    const rohan = await makeDevice()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-23T12:00:00.000Z'))
+    const own = await createMemberEntry({
+      deviceId: rohan.deviceId,
+      signerPublicKey: rohan.signerPublicKey,
+      privateKey: rohan.keyPair.privateKey,
+      displayName: 'Rohan',
+    })
+
+    // The clock jumps back an hour before the person without the app is added.
+    // Minted from it, their Entry id would sort before Rohan's own and the
+    // holder fold would name them the phone (#27).
+    vi.setSystemTime(new Date('2026-09-23T11:00:00.000Z'))
+    const shadow = await createMemberEntry({
+      deviceId: uuidv7(),
+      signerPublicKey: rohan.signerPublicKey,
+      privateKey: rohan.keyPair.privateKey,
+      displayName: 'Rohit',
+      mintedAfterEntryId: own.id,
+    })
+
+    expect(shadow.id > own.id).toBe(true)
+    expect(foldShadowHolders([own, shadow])).toEqual(
+      new Map([[shadow.authorDeviceId, own.authorDeviceId]]),
+    )
   })
 })

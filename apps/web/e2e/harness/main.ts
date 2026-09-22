@@ -8,6 +8,7 @@ import {
   exportSigningPublicKey,
   fromBase64Url,
   generateSigningKeyPair,
+  generateStorableSigningKeyPair,
   putEntry,
   readEntries,
   signEntryEnvelope,
@@ -42,6 +43,17 @@ interface HarnessApi {
     type: string
     payload: UnsignedEntryEnvelope['payload']
   }): Promise<string>
+  /**
+   * Writes the inverted pair a backwards clock used to mint (#27): two Member
+   * Entries signed by one fresh key, the person's id before the phone's, so
+   * ADR-0020's fold names the person the holder. Returns the phone's identity,
+   * PKCS8 included, so a test can open the app as that phone.
+   */
+  addInvertedHolderPair(input: { deviceName: string; personName: string }): Promise<{
+    deviceId: string
+    signerPublicKey: string
+    privateKeyPkcs8: string
+  }>
   /** Every raw value in the book, including anything malformed. */
   entryValues(): unknown[]
   /** A fresh Entry id, for tests that mint an envelope outside `putEntry`. */
@@ -224,6 +236,56 @@ window.harness = {
     render()
 
     return entry.id
+  },
+  async addInvertedHolderPair({ deviceName, personName }) {
+    // One fresh key claims two device ids. The person's Entry is minted a
+    // minute earlier — what a backwards clock between join and add produces on
+    // an unfixed writer (#27) — so the fold names the person the holder.
+    const keys = await generateStorableSigningKeyPair()
+    const pairSignerPublicKey = await exportSigningPublicKey(keys.publicKey)
+    const phoneJoinedAt = Date.now()
+    const personAddedAt = phoneJoinedAt - 60_000
+    const phoneDeviceId = uuidv7(phoneJoinedAt)
+    const personDeviceId = uuidv7(personAddedAt)
+    const claims = [
+      {
+        id: uuidv7(personAddedAt),
+        occurredAt: new Date(personAddedAt).toISOString(),
+        authorDeviceId: personDeviceId,
+        displayName: personName,
+      },
+      {
+        id: uuidv7(phoneJoinedAt),
+        occurredAt: new Date(phoneJoinedAt).toISOString(),
+        authorDeviceId: phoneDeviceId,
+        displayName: deviceName,
+      },
+    ]
+
+    for (const claim of claims) {
+      const entry = await signEntryEnvelope(
+        {
+          id: claim.id,
+          schemaVersion: ENTRY_SCHEMA_VERSION,
+          authorDeviceId: claim.authorDeviceId,
+          signerPublicKey: pairSignerPublicKey,
+          occurredAt: claim.occurredAt,
+          type: 'member',
+          payload: { displayName: claim.displayName },
+        },
+        keys.privateKey,
+      )
+
+      putEntry(doc, entry)
+    }
+
+    render()
+
+    return {
+      deviceId: phoneDeviceId,
+      signerPublicKey: pairSignerPublicKey,
+      privateKeyPkcs8: keys.privateKeyPkcs8,
+    }
   },
   async addSignedEntry(input) {
     // The harness is a Member, so its Entries pass admission.

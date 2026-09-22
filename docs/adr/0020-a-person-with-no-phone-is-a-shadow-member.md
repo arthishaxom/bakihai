@@ -11,6 +11,7 @@ A Member may keep the book for people who never install the app. The roster alre
 ## Consequences
 
 - Who is a shadow, and who holds its key, is a pure fold of the Entries: every device computes the same answer in any order. A key's first claimant by Entry id (ADR-0012's binding order) is the phone that carries it, and every other device id bound to that key is its shadow.
+- The app's own writer keeps the id order that fold reads: a device mints a Shadow Member's Entry after the Entry id that binds its own device, whatever the clock says, so a clock that jumps back between join and add cannot mint the person's claim first and invert the pair. A modified client can still backdate a claim — ADR-0012's social trust — and the read side follows the receiver's key regardless (ADR-0021).
 - Duplicate display names are already allowed (ADR-0014); the adder's name on the row and the "No phone" marker disambiguate in the Members list.
 - A shadow is archived and unarchived by the existing marker with ADR-0014's semantics: hidden from pickers, its Balance kept and settleable.
 - The later-join story is deliberately deferred. A real phone cannot claim the shadow's id without a key handover, and a handover would be the first exception to ADR-0012's no-rebind. When the person installs the app, they join as a new Member and the shadow stays as its own history, to be settled and archived. Link, merge, and handover are Later work.

@@ -756,7 +756,11 @@ function BookScreen({ identity }: { identity: Identity }) {
           tagTargetNarrative={selectedNarrative?.tagTargetNarrative}
           tagOptions={tagOptions}
           paymentAddresses={paymentAddresses}
-          viewer={{ deviceId: identity.deviceId, displayName: identity.displayName }}
+          viewer={{
+            deviceId: identity.deviceId,
+            displayName: identity.displayName,
+            signerPublicKey: identity.signerPublicKey,
+          }}
           members={members}
           shadowHolders={shadowHolders}
           onReturn={writeReturn}

@@ -80,6 +80,29 @@ test('a person without the app is tracked end to end', async ({ browser }) => {
   await rohanContext.close()
 })
 
+test('a clock that jumps back between join and add keeps the holder in front', async ({
+  browser,
+}) => {
+  const rohanContext = await browser.newContext(PHONE)
+  const rohan = await rohanContext.newPage()
+  await rohan.goto('/')
+  // Rohan joins at one time...
+  await rohan.clock.setFixedTime(new Date('2026-09-23T12:00:00.000Z'))
+  await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  // ...and the clock jumps back an hour before the person without the app is
+  // added. Minted from it, their Entry id would sort before Rohan's own Member
+  // Entry and the fold would name them the phone (#27); the writer floors
+  // their id to Rohan's own instead.
+  await rohan.clock.setFixedTime(new Date('2026-09-23T11:00:00.000Z'))
+  await addShadowMember(rohan, 'Rohit')
+
+  await expect(memberRow(rohan, 'Rohit')).toContainText('No phone · Added by you')
+  await expect(rohan.getByTestId('own-member')).toContainText('Rohan')
+
+  await rohanContext.close()
+})
+
 test('archiving a person without the app keeps their Balance settleable', async ({ browser }) => {
   const rohanContext = await browser.newContext(PHONE)
   const rohan = await rohanContext.newPage()

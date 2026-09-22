@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { compareText } from '../compare'
 import { ENTRY_SCHEMA_VERSION, type EntryEnvelope, signEntryEnvelope } from '../entry-envelope'
-import { uuidv7 } from '../uuidv7'
+import { uuidv7, uuidv7After } from '../uuidv7'
 
 /** Entry type that records a Member joining the Group. */
 export const MEMBER_ENTRY_TYPE = 'member'
@@ -37,19 +37,28 @@ export interface CreateMemberEntryInput {
   displayName: string
   /** Device clock; display ordering only. Defaults to now. */
   occurredAt?: string
+  /**
+   * The Entry id of this device's own first Member Entry, set when this Entry
+   * claims a fresh device id signed with this device's key: a Shadow Member
+   * (ADR-0020). The new id is minted to sort after that one even if the clock
+   * has moved backwards, so id order can never invert the phone and the person
+   * it tracks.
+   */
+  mintedAfterEntryId?: string
 }
 
 /**
  * Writes this device's Member Entry: a signed record of joining the Group.
  * Membership is append-only like any other Entry, so nobody can quietly
- * rewrite whose key belongs to whom (#5, #8).
+ * rewrite whose key belongs to whom (#5, #8). The same Entry claims a Shadow
+ * Member when `mintedAfterEntryId` names this device's own Entry (ADR-0020).
  */
 export async function createMemberEntry(input: CreateMemberEntryInput): Promise<EntryEnvelope> {
   const payload = memberEntryPayloadSchema.parse({ displayName: input.displayName })
 
   return signEntryEnvelope(
     {
-      id: uuidv7(),
+      id: input.mintedAfterEntryId === undefined ? uuidv7() : uuidv7After(input.mintedAfterEntryId),
       schemaVersion: ENTRY_SCHEMA_VERSION,
       authorDeviceId: input.deviceId,
       signerPublicKey: input.signerPublicKey,

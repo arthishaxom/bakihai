@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { uuidv7 } from '../src/uuidv7'
+import { uuidv7, uuidv7After, uuidv7Timestamp } from '../src/uuidv7'
 
 const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -39,5 +39,23 @@ describe('uuidv7', () => {
     expect(() => uuidv7(-1)).toThrow(RangeError)
     expect(() => uuidv7(2 ** 48)).toThrow(RangeError)
     expect(() => uuidv7(1.5)).toThrow(RangeError)
+  })
+
+  it('reads the timestamp back out of an id', () => {
+    expect(uuidv7Timestamp(uuidv7(0x010203040506))).toBe(0x010203040506)
+  })
+
+  it('rejects a string that is not a UUIDv7', () => {
+    expect(() => uuidv7Timestamp('not-an-entry-id')).toThrow(RangeError)
+  })
+
+  it('mints after an id even when the clock is behind it', () => {
+    const earlier = uuidv7(2_000)
+
+    expect(uuidv7Timestamp(uuidv7After(earlier, 1_000))).toBe(2_001)
+  })
+
+  it('keeps the clock when it is ahead of the id', () => {
+    expect(uuidv7Timestamp(uuidv7After(uuidv7(1_000), 5_000))).toBe(5_000)
   })
 })

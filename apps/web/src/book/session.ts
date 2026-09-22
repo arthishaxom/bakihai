@@ -272,11 +272,15 @@ function createBookSession(identity: Identity): BookSession {
       const privateKey = await deviceKey()
       // A person with no phone gets a fresh device id of their own; the Entry
       // is signed with this device's key, which then holds theirs (ADR-0020).
+      // The id is minted after this device's own, so a clock that moved
+      // backwards cannot invert the pair in the holder fold (#27).
+      const ownEntryId = ownBindingEntryId(doc, identity)
       const entry = await createMemberEntry({
         deviceId: uuidv7(),
         signerPublicKey: identity.signerPublicKey,
         privateKey,
         displayName: input.displayName,
+        ...(ownEntryId === undefined ? {} : { mintedAfterEntryId: ownEntryId }),
       })
 
       putEntry(doc, entry)
@@ -386,4 +390,32 @@ async function hasOwnMemberEntry(doc: Y.Doc, identity: Identity): Promise<boolea
   }
 
   return false
+}
+
+/**
+ * The Entry id that binds this device: the earliest Member Entry it wrote
+ * under its own key. A Shadow Member's Entry is minted after it, whatever the
+ * clock says, so the holder fold always reads the phone before the person it
+ * tracks (ADR-0020, #27). Entry ids are UUIDv7 strings, so lexical order is
+ * the fold's order (ADR-0012). Undefined only while this device's Member
+ * Entry has not reached the local book.
+ */
+function ownBindingEntryId(doc: Y.Doc, identity: Identity): string | undefined {
+  let binding: string | undefined
+
+  for (const entry of readEntries(doc)) {
+    if (
+      entry.type !== MEMBER_ENTRY_TYPE ||
+      entry.authorDeviceId !== identity.deviceId ||
+      entry.signerPublicKey !== identity.signerPublicKey
+    ) {
+      continue
+    }
+
+    if (binding === undefined || entry.id < binding) {
+      binding = entry.id
+    }
+  }
+
+  return binding
 }
