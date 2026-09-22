@@ -391,13 +391,19 @@ export function describeSettlementLine(
 }
 
 /**
- * Whether a Settlement has been attested to: a receiver-authored record is
- * confirmed from the start, a payer's claim waits for the receiver (ADR-0015).
+ * Whether a Settlement has been attested to, and by whom: a Settlement the
+ * receiver's key wrote is confirmed from the start, a payer's claim waits for
+ * that key, and a Confirm names the key holder who wrote it (ADR-0015,
+ * ADR-0021).
  */
 export function describeSettlementStatus(settlement: SettlementState, members: Member[]): string {
-  const receiver = nameFor(members, settlement.toDeviceId)
+  if (!settlement.confirmed) {
+    return `Waiting for ${nameFor(members, settlement.toDeviceId)} to confirm`
+  }
 
-  return settlement.confirmed ? `Confirmed by ${receiver}` : `Waiting for ${receiver} to confirm`
+  const attesterId = settlement.confirmation?.authorDeviceId ?? settlement.entry.authorDeviceId
+
+  return `Confirmed by ${nameFor(members, attesterId)}`
 }
 
 /** A choice in the Settlement form's tag picker: the tag, how it reads, and who could cover it. */

@@ -83,8 +83,8 @@ interface EntryDetailSheetProps {
    * only when its receiver has one (ADR-0017).
    */
   paymentAddresses: ReadonlyMap<string, PaymentAddress>
-  /** This device's Member identity, so only the receiver is offered a Confirm. */
-  viewer: Pick<Member, 'deviceId' | 'displayName'>
+  /** This device's Member identity, so whoever holds the receiver's key is offered a Confirm. */
+  viewer: Pick<Member, 'deviceId' | 'displayName' | 'signerPublicKey'>
   members: Member[]
   /** Signs and writes a Return against `loan`; resolves once it is in the local book. */
   onReturn: (input: ReturnDraft) => Promise<void>
@@ -178,12 +178,16 @@ export function EntryDetailSheet({
   // Coverage acts on the Expense itself: a Voided Expense, and the Expense row
   // of a Settlement, offer no share to settle.
   const outstandingExpense = entry.type === EXPENSE_ENTRY_TYPE && !voidedBy ? expense : undefined
-  // Only the Settlement's receiver can attest to a claim, and only while the
-  // claim is unconfirmed and the Settlement not Voided (ADR-0015).
+  // Only the Member holding the receiver's key can attest to a claim, and only
+  // while the claim is unconfirmed and the Settlement not Voided (ADR-0021).
+  const receiverKey =
+    settlement === undefined
+      ? undefined
+      : members.find((member) => member.deviceId === settlement.toDeviceId)?.signerPublicKey
   const canConfirm =
     settlement !== undefined &&
     !settlement.confirmed &&
-    settlement.toDeviceId === viewer.deviceId &&
+    receiverKey === viewer.signerPublicKey &&
     !voidedBy
   // A Voided Settlement reads its tag from its own payload; a live one from the fold.
   const settlementTag = settlementTagOf(entry, settlement)
@@ -523,7 +527,11 @@ export function EntryDetailSheet({
           <div className="flex flex-col gap-3 border-foreground/10 border-t pt-4">
             <p className="text-muted-foreground text-sm">
               {nameFor(members, settlement.entry.authorDeviceId)} recorded this Settlement. Confirm
-              that it reached you.
+              that it reached{' '}
+              {settlement.toDeviceId === viewer.deviceId
+                ? 'you'
+                : nameFor(members, settlement.toDeviceId)}
+              .
             </p>
             {confirmError ? (
               <p role="alert" className="text-red-600 text-sm">

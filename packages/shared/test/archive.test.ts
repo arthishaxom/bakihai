@@ -9,7 +9,7 @@ import {
   type SettlementTag,
 } from '../src/group/settlements'
 import { createVoidEntry } from '../src/group/voids'
-import { makeDevice, makeExpenseEntry, type TestDevice } from './helpers/entries'
+import { makeDevice, makeExpenseEntry, makeMemberEntry, type TestDevice } from './helpers/entries'
 
 /** A device writes an Expense for an amount only a named Member shares. */
 function expenseFor(device: TestDevice, sharerDeviceId: string, occurredAt: string) {
@@ -174,6 +174,7 @@ describe('archivedEntryIds', () => {
   it('archives a tagged Settlement and its Confirm with the item they settle', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
+    const roster = [await makeMemberEntry(rohan, 'Rohan'), await makeMemberEntry(mira, 'Mira')]
     const dinner = await expenseFor(rohan, mira.deviceId, '2026-08-01T10:00:00.000Z')
     // Mira records the Settlement herself, then Rohan attests to a claim of his own.
     const miraPaid = await pay(mira, {
@@ -190,7 +191,7 @@ describe('archivedEntryIds', () => {
     })
     const attested = await confirm(mira, claimed.id)
 
-    const at = archived([dinner, miraPaid, claimed, attested], FIFTEEN_DAYS_LATER)
+    const at = archived([...roster, dinner, miraPaid, claimed, attested], FIFTEEN_DAYS_LATER)
 
     expect(at.has(miraPaid.id)).toBe(true)
     expect(at.has(claimed.id)).toBe(true)

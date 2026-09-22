@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { compareText } from '../compare'
 import { ENTRY_SCHEMA_VERSION, type EntryEnvelope, signEntryEnvelope } from '../entry-envelope'
 import { uuidv7 } from '../uuidv7'
+import { foldMemberKeys } from './members'
 import { foldVoids } from './voids'
 
 /** Entry type that records a Settlement: a real payment from one Member to another. */
@@ -180,9 +181,9 @@ export async function createSettlementConfirmEntry(
 
 /**
  * A Settlement folded from the whole book: the money that moved, and whether
- * its receiver has attested to it. A Settlement the receiver authored is
- * confirmed by its own authorship; a payer's claim is confirmed by a Confirm
- * Entry the receiver wrote (ADR-0015).
+ * its receiver's key has attested to it. A Settlement the receiver's key
+ * authored is confirmed by its own authorship; a payer's claim is confirmed by
+ * a Confirm Entry that key wrote (ADR-0015, ADR-0021).
  */
 export interface SettlementState {
   settlementEntryId: string
@@ -195,24 +196,29 @@ export interface SettlementState {
   tag?: SettlementTag
   /** The receiver's Confirm Entry, when one attests to this Settlement. */
   confirmation?: EntryEnvelope
-  /** True when the receiver authored the Settlement or confirmed a claim. */
+  /** True when the receiver's key authored the Settlement or confirmed a claim. */
   confirmed: boolean
 }
 
 /**
  * Folds the book's Settlement and Confirm Entries into payment states. A
  * Settlement counts from the moment it is appended (ADR-0007), so the fold
- * never holds one back: it only says whether the receiver has attested to it.
- * A Confirm from anyone but the Settlement's receiver is ignored, as is one
- * naming a Voided Settlement (ADR-0015); when two Confirms name one Settlement,
- * the earliest by Entry id wins, so every device reports the same confirmation.
- * Voided Entries drop out entirely, and a Voided Confirm reopens the claim it
- * had closed (ADR-0005). The result is a pure function of the Entries — the
- * same book folds the same payments in any order — and Entries this version
- * cannot read are ignored rather than misread.
+ * never holds one back: it only says whether the receiver's key has attested
+ * to it. Attestation is by that key, not by the receiver's device id
+ * (ADR-0021): a Settlement is confirmed when its author holds the key bound to
+ * the receiver's id — for a Member whose own phone holds it, that is the
+ * receiver's own authorship — and a Confirm counts when that key holder wrote
+ * it. A Confirm from any other key is ignored, as is one naming a Voided
+ * Settlement; when two Confirms name one Settlement, the earliest by Entry id
+ * wins, so every device reports the same confirmation. Voided Entries drop out
+ * entirely, and a Voided Confirm reopens the claim it had closed (ADR-0005).
+ * The result is a pure function of the Entries — the same book folds the same
+ * payments in any order — and Entries this version cannot read are ignored
+ * rather than misread.
  */
 export function foldSettlements(entries: EntryEnvelope[]): SettlementState[] {
   const voidedByTarget = foldVoids(entries)
+  const memberKeys = foldMemberKeys(entries)
   const settlements = new Map<string, { entry: EntryEnvelope; payload: SettlementEntryPayload }>()
 
   for (const entry of entries) {
@@ -243,7 +249,10 @@ export function foldSettlements(entries: EntryEnvelope[]): SettlementState[] {
 
     const settlement = settlements.get(payload.settlementEntryId)
 
-    if (!settlement || confirmEntry.authorDeviceId !== settlement.payload.toDeviceId) {
+    if (
+      !settlement ||
+      memberKeys.get(settlement.payload.toDeviceId) !== confirmEntry.signerPublicKey
+    ) {
       continue
     }
 
@@ -255,9 +264,9 @@ export function foldSettlements(entries: EntryEnvelope[]): SettlementState[] {
   return [...settlements.values()]
     .map(({ entry, payload }): SettlementState => {
       const confirmation = confirmationBySettlementId.get(entry.id)
-      // A Settlement the receiver wrote is a record of what happened, not a
-      // claim: there is nothing left to attest (ADR-0015).
-      const receiverAuthored = entry.authorDeviceId === payload.toDeviceId
+      // A Settlement the receiver's key wrote is a record of what happened,
+      // not a claim: there is nothing left to attest (ADR-0015, ADR-0021).
+      const receiverKeyAuthored = memberKeys.get(payload.toDeviceId) === entry.signerPublicKey
 
       return {
         settlementEntryId: entry.id,
@@ -268,7 +277,7 @@ export function foldSettlements(entries: EntryEnvelope[]): SettlementState[] {
         ...(payload.note === undefined ? {} : { note: payload.note }),
         ...(payload.tag === undefined ? {} : { tag: payload.tag }),
         ...(confirmation === undefined ? {} : { confirmation }),
-        confirmed: receiverAuthored || confirmation !== undefined,
+        confirmed: receiverKeyAuthored || confirmation !== undefined,
       }
     })
     .sort((left, right) => compareText(left.settlementEntryId, right.settlementEntryId))

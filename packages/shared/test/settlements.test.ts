@@ -256,9 +256,10 @@ describe('foldSettlements', () => {
     expect(state.confirmation).toBeUndefined()
   })
 
-  it('marks a Settlement its receiver wrote as already confirmed', async () => {
+  it("marks a Settlement the receiver's own device wrote as already confirmed", async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
+    const roster = [await makeMemberEntry(rohan, 'Rohan'), await makeMemberEntry(mira, 'Mira')]
     // The receiver records "Rohan paid me": nothing is left to attest (ADR-0015).
     const settlement = await pay(mira, {
       fromDeviceId: rohan.deviceId,
@@ -266,7 +267,7 @@ describe('foldSettlements', () => {
       amountPaise: 12_000,
     })
 
-    const state = onlySettlement([settlement])
+    const state = onlySettlement([...roster, settlement])
 
     expect(state.fromDeviceId).toBe(rohan.deviceId)
     expect(state.toDeviceId).toBe(mira.deviceId)
@@ -295,10 +296,11 @@ describe('foldSettlements', () => {
   it('marks a payer-written Settlement confirmed once its receiver writes a Confirm', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
+    const roster = [await makeMemberEntry(rohan, 'Rohan'), await makeMemberEntry(mira, 'Mira')]
     const settlement = await pay(rohan, { toDeviceId: mira.deviceId, amountPaise: 12_000 })
     const confirmed = await confirm(mira, settlement.id)
 
-    const state = onlySettlement([settlement, confirmed])
+    const state = onlySettlement([...roster, settlement, confirmed])
 
     expect(state.confirmed).toBe(true)
     expect(state.confirmation).toEqual(confirmed)
@@ -308,12 +310,75 @@ describe('foldSettlements', () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
     const kabir = await makeDevice()
+    const roster = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry(mira, 'Mira'),
+      await makeMemberEntry(kabir, 'Kabir'),
+    ]
     const settlement = await pay(rohan, { toDeviceId: mira.deviceId, amountPaise: 12_000 })
     const fromPayer = await confirm(rohan, settlement.id)
     const fromBystander = await confirm(kabir, settlement.id)
 
-    expect(onlySettlement([settlement, fromPayer]).confirmed).toBe(false)
-    expect(onlySettlement([settlement, fromBystander]).confirmed).toBe(false)
+    expect(onlySettlement([...roster, settlement, fromPayer]).confirmed).toBe(false)
+    expect(onlySettlement([...roster, settlement, fromBystander]).confirmed).toBe(false)
+  })
+
+  it('confirms a Settlement to a person with no phone when its key holder wrote it', async () => {
+    const rohan = await makeDevice()
+    const rohitId = uuidv7()
+    const roster = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+    ]
+    // Rohan records "I paid Rohit": he holds Rohit's key, so his authorship is
+    // the receiver's side of the book (ADR-0021).
+    const settlement = await pay(rohan, { toDeviceId: rohitId, amountPaise: 12_000 })
+
+    expect(onlySettlement([...roster, settlement]).confirmed).toBe(true)
+    expect(foldSettlementsAwaitingConfirmation([...roster, settlement])).toEqual([])
+  })
+
+  it('accepts a Confirm the key holder writes for a claim someone else recorded', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const rohitId = uuidv7()
+    const roster = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry(mira, 'Mira'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+    ]
+    // Mira claims she paid Rohit; only Rohan, who holds Rohit's key, can attest.
+    const settlement = await pay(mira, {
+      fromDeviceId: mira.deviceId,
+      toDeviceId: rohitId,
+      amountPaise: 12_000,
+    })
+    const confirmed = await confirm(rohan, settlement.id)
+
+    expect(onlySettlement([...roster, settlement]).confirmed).toBe(false)
+    expect(onlySettlement([...roster, settlement, confirmed]).confirmed).toBe(true)
+    expect(foldSettlementsAwaitingConfirmation([...roster, settlement, confirmed])).toEqual([])
+  })
+
+  it('ignores a Confirm for a person with no phone from a device that does not hold its key', async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const kabir = await makeDevice()
+    const rohitId = uuidv7()
+    const roster = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry(mira, 'Mira'),
+      await makeMemberEntry(kabir, 'Kabir'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+    ]
+    const settlement = await pay(mira, {
+      fromDeviceId: mira.deviceId,
+      toDeviceId: rohitId,
+      amountPaise: 12_000,
+    })
+    const fromBystander = await confirm(kabir, settlement.id)
+
+    expect(onlySettlement([...roster, settlement, fromBystander]).confirmed).toBe(false)
   })
 
   it('ignores a Confirm naming a Settlement that is not in the book', async () => {
@@ -326,13 +391,14 @@ describe('foldSettlements', () => {
   it('picks the earliest Confirm by Entry id when two name one Settlement', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
+    const roster = [await makeMemberEntry(rohan, 'Rohan'), await makeMemberEntry(mira, 'Mira')]
     const settlement = await pay(rohan, { toDeviceId: mira.deviceId, amountPaise: 12_000 })
     const first = await confirm(mira, settlement.id)
     const second = await confirm(mira, settlement.id)
     const earliestId = [first.id, second.id].sort(compareText)[0]
 
-    expect(onlySettlement([settlement, first, second]).confirmation?.id).toBe(earliestId)
-    expect(onlySettlement([settlement, second, first]).confirmation?.id).toBe(earliestId)
+    expect(onlySettlement([...roster, settlement, first, second]).confirmation?.id).toBe(earliestId)
+    expect(onlySettlement([...roster, settlement, second, first]).confirmation?.id).toBe(earliestId)
   })
 
   it('drops a Voided Settlement and ignores a Confirm naming it', async () => {
@@ -349,12 +415,13 @@ describe('foldSettlements', () => {
   it('reopens an unconfirmed Settlement when its Confirm is Voided', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
+    const roster = [await makeMemberEntry(rohan, 'Rohan'), await makeMemberEntry(mira, 'Mira')]
     const settlement = await pay(rohan, { toDeviceId: mira.deviceId, amountPaise: 12_000 })
     const confirmed = await confirm(mira, settlement.id)
     const voidedConfirm = await voidEntry(mira, confirmed.id)
 
-    expect(onlySettlement([settlement, confirmed]).confirmed).toBe(true)
-    expect(onlySettlement([settlement, confirmed, voidedConfirm]).confirmed).toBe(false)
+    expect(onlySettlement([...roster, settlement, confirmed]).confirmed).toBe(true)
+    expect(onlySettlement([...roster, settlement, confirmed, voidedConfirm]).confirmed).toBe(false)
   })
 
   it('yields the same states whatever order the Entries arrive in', async () => {
@@ -370,6 +437,7 @@ describe('foldSettlements', () => {
   it('folds the same states no matter what the Entries claim about the clock', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
+    const roster = [await makeMemberEntry(rohan, 'Rohan'), await makeMemberEntry(mira, 'Mira')]
     const settlement = await pay(rohan, {
       toDeviceId: mira.deviceId,
       amountPaise: 12_000,
@@ -377,9 +445,9 @@ describe('foldSettlements', () => {
     })
     const confirmed = await confirm(mira, settlement.id, '1970-01-01T00:00:00.000Z')
 
-    expect(onlySettlement([settlement, confirmed]).confirmed).toBe(true)
-    expect(foldSettlements([settlement, confirmed])).toEqual(
-      foldSettlements([confirmed, settlement]),
+    expect(onlySettlement([...roster, settlement, confirmed]).confirmed).toBe(true)
+    expect(foldSettlements([...roster, settlement, confirmed])).toEqual(
+      foldSettlements([...roster, confirmed, settlement]),
     )
   })
 
@@ -424,23 +492,25 @@ describe('foldSettlementsAwaitingConfirmation', () => {
   it('lists a payer-written claim until its receiver confirms', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
+    const roster = [await makeMemberEntry(rohan, 'Rohan'), await makeMemberEntry(mira, 'Mira')]
     const settlement = await pay(rohan, { toDeviceId: mira.deviceId, amountPaise: 12_000 })
     const confirmed = await confirm(mira, settlement.id)
 
-    expect(foldSettlementsAwaitingConfirmation([settlement])).toHaveLength(1)
-    expect(foldSettlementsAwaitingConfirmation([settlement, confirmed])).toEqual([])
+    expect(foldSettlementsAwaitingConfirmation([...roster, settlement])).toHaveLength(1)
+    expect(foldSettlementsAwaitingConfirmation([...roster, settlement, confirmed])).toEqual([])
   })
 
   it('never lists a Settlement its receiver wrote', async () => {
     const rohan = await makeDevice()
     const mira = await makeDevice()
+    const roster = [await makeMemberEntry(rohan, 'Rohan'), await makeMemberEntry(mira, 'Mira')]
     const settlement = await pay(mira, {
       fromDeviceId: rohan.deviceId,
       toDeviceId: mira.deviceId,
       amountPaise: 12_000,
     })
 
-    expect(foldSettlementsAwaitingConfirmation([settlement])).toEqual([])
+    expect(foldSettlementsAwaitingConfirmation([...roster, settlement])).toEqual([])
   })
 
   it('is empty for a book with no Settlements', () => {

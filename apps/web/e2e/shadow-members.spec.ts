@@ -9,7 +9,9 @@ import {
   memberNames,
   memberRow,
   openAddSheet,
+  openEntrySheet,
   openLoanForm,
+  openSettlementForm,
   openSettleUp,
 } from './helpers'
 
@@ -206,6 +208,99 @@ test('a person added on one phone reads on the other and takes Entries from both
 
   await expect.poll(() => balanceTexts(mira)).toEqual(['Rohit owes You ₹100'])
   await expect.poll(() => balanceTexts(rohan)).toEqual(['Rohit owes Mira ₹100'])
+
+  await rohanContext.close()
+  await miraContext.close()
+})
+
+test('a Settlement to a person with no phone is confirmed by its key holder', async ({
+  browser,
+}) => {
+  const rohanContext = await browser.newContext(PHONE)
+  const rohan = await rohanContext.newPage()
+  await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  await addShadowMember(rohan, 'Rohit')
+
+  // Rohan records "I paid Rohit ₹100": he holds Rohit's key, so the receiver's
+  // side authored it and nothing waits on a phone that does not exist.
+  const settlements = entryRow(rohan, 'settlement')
+  const before = await settlements.count()
+  const form = await openSettlementForm(rohan)
+
+  await form.getByLabel('Member').selectOption({ label: 'Rohit' })
+  await form.getByLabel('Amount (₹)').fill('100')
+  await form.getByRole('button', { name: 'Add settlement' }).click()
+  await expect(settlements).toHaveCount(before + 1)
+
+  await expect(settlements).toContainText('Rohan paid Rohit ₹100')
+  await expect(settlements).not.toContainText('Waiting for')
+  await expect(rohan.getByTestId('waiting-count')).toHaveCount(0)
+
+  // The detail sheet names who attested, and offers no Confirm: it is done.
+  const sheet = await openEntrySheet(rohan, settlements)
+
+  await expect(sheet.getByTestId('settlement-status')).toHaveText('Confirmed by Rohan')
+  await expect(sheet.getByTestId('confirm-settlement')).toHaveCount(0)
+
+  await rohanContext.close()
+})
+
+test('a claim against a person with no phone is confirmed by the holder', async ({ browser }) => {
+  const rohanContext = await browser.newContext(PHONE)
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  await addShadowMember(rohan, 'Rohit')
+
+  const miraContext = await browser.newContext(PHONE)
+  const mira = await miraContext.newPage()
+  await joinGroup(mira, invite, 'Mira')
+  await expect
+    .poll(async () => (await memberNames(mira)).sort())
+    .toEqual(['Mira', 'Rohan', 'Rohit'])
+
+  // Mira claims "I paid Rohit ₹100". Only Rohan, who holds Rohit's key, can
+  // attest to it.
+  const settlements = entryRow(mira, 'settlement')
+  const before = await settlements.count()
+  const form = await openSettlementForm(mira)
+
+  await form.getByLabel('Member').selectOption({ label: 'Rohit' })
+  await form.getByLabel('Amount (₹)').fill('100')
+  await form.getByRole('button', { name: 'Add settlement' }).click()
+  await expect(settlements).toHaveCount(before + 1)
+
+  await expect(settlements).toContainText('Waiting for Rohit to confirm')
+  await expect(mira.getByTestId('waiting-count')).toHaveText(
+    '1 Settlement waiting for confirmation',
+  )
+  await expect(rohan.getByTestId('waiting-count')).toHaveText(
+    '1 Settlement waiting for confirmation',
+  )
+
+  // The payer's phone is never offered the Confirm...
+  const payerSheet = await openEntrySheet(mira, settlements)
+
+  await expect(payerSheet.getByTestId('confirm-settlement')).toHaveCount(0)
+  await mira.keyboard.press('Escape')
+  await expect(mira.getByRole('dialog')).toHaveCount(0)
+
+  // ...the holder's phone is, and confirming clears the wait everywhere.
+  const sheet = await openEntrySheet(rohan, entryRow(rohan, 'settlement'))
+
+  await sheet.getByTestId('confirm-settlement').click()
+  await expect(rohan.getByRole('dialog')).toHaveCount(0)
+
+  await expect(rohan.getByTestId('waiting-count')).toHaveCount(0)
+  await expect.poll(() => mira.getByTestId('waiting-count').count()).toBe(0)
+  await expect(entryRow(rohan, 'settlement')).not.toContainText('Waiting for')
+  await expect(entryRow(rohan, 'settlement-confirm')).toContainText('Rohan confirmed')
+  await expect(entryRow(rohan, 'settlement-confirm')).toContainText('Mira paid Rohit ₹100')
+
+  const confirmedSheet = await openEntrySheet(rohan, entryRow(rohan, 'settlement'))
+
+  await expect(confirmedSheet.getByTestId('settlement-status')).toHaveText('Confirmed by Rohan')
 
   await rohanContext.close()
   await miraContext.close()
