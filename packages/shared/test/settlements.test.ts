@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { compareText } from '../src/compare'
 import { verifyEntryEnvelope } from '../src/entry-envelope'
 import { admitEntries } from '../src/group/admission'
+import { foldShadowHolders } from '../src/group/members'
 import {
   createSettlementConfirmEntry,
   createSettlementEntry,
@@ -379,6 +380,43 @@ describe('foldSettlements', () => {
     const fromBystander = await confirm(kabir, settlement.id)
 
     expect(onlySettlement([...roster, settlement, fromBystander]).confirmed).toBe(false)
+  })
+
+  it("keeps a Shadow Member's claim unconfirmed after its holder's key is gone", async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const rejoined = await makeDevice()
+    const rohitId = uuidv7()
+    // Rohan holds Rohit's key. His phone is wiped: he rejoins as a new Member
+    // with a new key, and the old key authors nothing more. Attestation for
+    // Rohit ended with it (ADR-0021).
+    const roster = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry(mira, 'Mira'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+      await makeMemberEntry(rejoined, 'Rohan (new)'),
+    ]
+    const settlement = await pay(mira, {
+      fromDeviceId: mira.deviceId,
+      toDeviceId: rohitId,
+      amountPaise: 12_000,
+    })
+
+    // The frozen binding still names the old Rohan as the holder: the rejoin
+    // is a separate Member and nothing here takes over the shadow.
+    expect(foldShadowHolders(roster).get(rohitId)).toBe(rohan.deviceId)
+    // Neither the payer nor the person who inherited Rohan's name can attest:
+    // only the key the shadow's id was bound to could, and it is gone.
+    expect(onlySettlement([...roster, settlement]).confirmed).toBe(false)
+    expect(
+      onlySettlement([...roster, settlement, await confirm(mira, settlement.id)]).confirmed,
+    ).toBe(false)
+    expect(
+      onlySettlement([...roster, settlement, await confirm(rejoined, settlement.id)]).confirmed,
+    ).toBe(false)
+    // The claim still counts — the Balance moved when it was appended — and
+    // still reads as waiting; what ended is anyone's ability to clear it.
+    expect(foldSettlementsAwaitingConfirmation([...roster, settlement])).toHaveLength(1)
   })
 
   it('ignores a Confirm naming a Settlement that is not in the book', async () => {

@@ -9,8 +9,10 @@ import {
   memberArchivedEntryPayloadSchema,
   readMemberArchivedPayload,
 } from '../src/group/member-archives'
-import { foldMemberKeys, foldMembers } from '../src/group/members'
+import { foldMemberKeys, foldMembers, foldShadowHolders } from '../src/group/members'
+import { createSettlementEntry } from '../src/group/settlements'
 import { canVoidEntry, createVoidEntry, foldVoids } from '../src/group/voids'
+import { uuidv7 } from '../src/uuidv7'
 import {
   makeDevice,
   makeEntry,
@@ -204,5 +206,48 @@ describe('Archived Members and the rest of the book', () => {
     expect(admitted).toContain(marker)
     expect(admitted).not.toContain(forged)
     expect(foldMemberArchives(admitted).get(mira.deviceId)).toBe(marker)
+  })
+
+  it("keeps a person with no phone folding and archivable after its holder's key is gone", async () => {
+    const rohan = await makeDevice()
+    const mira = await makeDevice()
+    const rejoined = await makeDevice()
+    const rohitId = uuidv7()
+    // The book from before the wipe: Rohan holds Rohit's key. Afterwards only
+    // Mira and Rohan's rejoin write, and the frozen binding still names Rohan,
+    // so nothing here depends on a key that no longer authors anything.
+    const roster = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry(mira, 'Mira'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+      await makeMemberEntry(rejoined, 'Rohan (new)'),
+    ]
+    const dinner = await makeExpenseEntry(rohan, {
+      amountPaise: 90_000,
+      participantDeviceIds: [rohitId],
+    })
+    const partial = await createSettlementEntry({
+      deviceId: mira.deviceId,
+      signerPublicKey: mira.signerPublicKey,
+      privateKey: mira.keyPair.privateKey,
+      fromDeviceId: mira.deviceId,
+      toDeviceId: rohitId,
+      amountPaise: 30_000,
+    })
+    const marker = await archive(mira, rohitId)
+    const entries = [...roster, dinner, partial]
+
+    expect(foldMembers(entries).map((member) => member.displayName)).toContain('Rohit')
+    expect(foldShadowHolders(entries).get(rohitId)).toBe(rohan.deviceId)
+    expect(foldBalances(entries)).toEqual(
+      expect.arrayContaining([
+        { debtorDeviceId: rohitId, creditorDeviceId: mira.deviceId, amountPaise: 30_000 },
+        { debtorDeviceId: rohitId, creditorDeviceId: rohan.deviceId, amountPaise: 90_000 },
+      ]),
+    )
+    // Archiving is visibility only: the Balances and the holder map do not move.
+    expect([...foldMemberArchives([...entries, marker]).keys()]).toEqual([rohitId])
+    expect(foldBalances([...entries, marker])).toEqual(foldBalances(entries))
+    expect(foldShadowHolders([...entries, marker])).toEqual(foldShadowHolders(entries))
   })
 })

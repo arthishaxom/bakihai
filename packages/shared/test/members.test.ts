@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { type EntryEnvelope, verifyEntryEnvelope } from '../src/entry-envelope'
+import {
+  ENTRY_SCHEMA_VERSION,
+  type EntryEnvelope,
+  signEntryEnvelope,
+  verifyEntryEnvelope,
+} from '../src/entry-envelope'
 import {
   createMemberEntry,
   foldMemberKeys,
@@ -249,5 +254,28 @@ describe('foldShadowHolders', () => {
     ]
 
     expect(foldShadowHolders(entries)).toEqual(new Map())
+  })
+
+  it('names no holder for a claim this version cannot read', async () => {
+    const rohan = await makeDevice()
+    const rohitId = uuidv7()
+    // An Entry this version cannot read is ignored, so its id is unbound and
+    // its key holds nothing — it can never make the writer a holder.
+    const unreadable = await signEntryEnvelope(
+      {
+        id: uuidv7(),
+        schemaVersion: ENTRY_SCHEMA_VERSION,
+        authorDeviceId: rohitId,
+        signerPublicKey: rohan.signerPublicKey,
+        occurredAt: JOINED_AT,
+        type: MEMBER_ENTRY_TYPE,
+        payload: { deviceId: rohitId, name: 'Rohit' },
+      },
+      rohan.keyPair.privateKey,
+    )
+    const entries = [await makeMemberEntry(rohan, 'Rohan'), unreadable]
+
+    expect(foldShadowHolders(entries)).toEqual(new Map())
+    expect(foldMemberKeys(entries)).toEqual(new Map([[rohan.deviceId, rohan.signerPublicKey]]))
   })
 })

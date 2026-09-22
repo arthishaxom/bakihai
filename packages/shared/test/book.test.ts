@@ -5,7 +5,7 @@ import type { EntryEnvelope } from '../src/entry-envelope'
 import { foldBalances } from '../src/group/balances'
 import { createLoanEntry, createReturnEntry } from '../src/group/loans'
 import { createMemberArchivedEntry } from '../src/group/member-archives'
-import { foldMembers } from '../src/group/members'
+import { createMemberEntry, foldMembers } from '../src/group/members'
 import { createPaymentAddressEntry } from '../src/group/payment-addresses'
 import { createSettlementConfirmEntry, createSettlementEntry } from '../src/group/settlements'
 import { createVoidEntry } from '../src/group/voids'
@@ -103,6 +103,27 @@ describe('book document', () => {
         .map((entry) => entry.id)
         .sort(),
     ).toEqual(entries.map((entry) => entry.id).sort())
+    expect(updates).toHaveLength(0)
+  })
+
+  it("writing a person with no phone's Member Entry twice changes nothing", async () => {
+    const doc = createBookDoc()
+    const rohan = await makeDevice()
+    const entry = await createMemberEntry({
+      deviceId: uuidv7(),
+      signerPublicKey: rohan.signerPublicKey,
+      privateKey: rohan.keyPair.privateKey,
+      displayName: 'Rohit',
+    })
+
+    putEntry(doc, entry)
+    const updates: Uint8Array[] = []
+    doc.on('update', (update) => updates.push(update))
+    putEntry(doc, entry)
+
+    // A duplicate id is a no-op for a Shadow Member like any other Entry, so
+    // a replay can neither duplicate the person nor rewrite their binding.
+    expect(readEntries(doc)).toEqual([entry])
     expect(updates).toHaveLength(0)
   })
 

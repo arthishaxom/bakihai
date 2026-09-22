@@ -225,4 +225,67 @@ describe('admitEntries', () => {
         .sort(),
     ).toEqual(['Rohan', 'Rohit'])
   })
+
+  it('drops an Entry written for a device id no readable Member Entry bound', async () => {
+    const rohan = await makeDevice()
+    const unboundId = uuidv7()
+    // A Member can write as a device id they hold, but this id has no claim at
+    // all; writing under it is writing as a person the Group does not hold.
+    const writtenAsUnbound = await entrySignedBy(rohan, unboundId, 'expense', {
+      amountPaise: 90_000,
+      payerDeviceId: unboundId,
+      participantDeviceIds: [rohan.deviceId],
+    })
+    // A claim this version cannot read binds nothing either, so the Entry it
+    // names has no key to write under.
+    const unreadableClaim = await entrySignedBy(rohan, unboundId, 'member', {
+      displayName: 'x'.repeat(100),
+    })
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      unreadableClaim,
+      writtenAsUnbound,
+      await entrySignedBy(rohan, unboundId, 'expense', {
+        amountPaise: 100,
+        payerDeviceId: unboundId,
+        participantDeviceIds: [rohan.deviceId],
+      }),
+    ]
+
+    expect(admitEntries(entries)).toEqual([entries[0]])
+    expect(foldBalances(admitEntries(entries))).toEqual([])
+  })
+
+  it('drops everything a forger writes as a person with no phone they tried to rebind', async () => {
+    const rohan = await makeDevice()
+    const mallory = await makeDevice()
+    const rohitId = uuidv7()
+    // Both Expenses name the same pair, so only the holder's arithmetic shows.
+    const asRohit = (amountPaise: number) => ({
+      amountPaise,
+      payerDeviceId: rohitId,
+      participantDeviceIds: [rohan.deviceId],
+    })
+    const entries = [
+      await makeMemberEntry(rohan, 'Rohan'),
+      await makeMemberEntry({ ...rohan, deviceId: rohitId }, 'Rohit'),
+      // Mallory claims Rohit's id under their own key, then writes as Rohit
+      // with that same key. The binding pass drops the claim, so the write is
+      // a stranger's Entry like any other.
+      await makeMemberEntry({ ...mallory, deviceId: rohitId }, 'Not Rohit', JOINED_AT),
+      await entrySignedBy(mallory, rohitId, 'expense', asRohit(999_900)),
+      // The holder's key is what the id is bound to, so an Entry it writes as
+      // the shadow is admitted, exactly as the id's own key would be.
+      await entrySignedBy(rohan, rohitId, 'expense', asRohit(90_000)),
+    ]
+    const admitted = admitEntries(entries)
+    const idsOf = (admittedEntries: EntryEnvelope[]) =>
+      admittedEntries.map((entry) => entry.id).sort((left, right) => left.localeCompare(right))
+
+    expect(admitted).toEqual([entries[0], entries[1], entries[4]])
+    expect(idsOf(admitEntries([...entries].reverse()))).toEqual(idsOf(admitted))
+    expect(foldBalances(admitted)).toEqual([
+      { debtorDeviceId: rohan.deviceId, creditorDeviceId: rohitId, amountPaise: 90_000 },
+    ])
+  })
 })

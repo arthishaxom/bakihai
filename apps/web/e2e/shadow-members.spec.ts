@@ -1,5 +1,6 @@
 import { type BrowserContextOptions, expect, type Page, test } from '@playwright/test'
 import {
+  addShadowMember,
   archivedMemberNames,
   archivedMemberRow,
   balanceTexts,
@@ -23,19 +24,6 @@ const PHONE: BrowserContextOptions = {
 }
 
 test.use(PHONE)
-
-/** Adds a person without the app from the Members list and waits for their row. */
-async function addShadowMember(page: Page, name: string): Promise<void> {
-  await page.getByTestId('add-shadow-member').click()
-
-  const sheet = page.getByRole('dialog')
-
-  await expect(sheet).toBeVisible()
-  await sheet.getByLabel('Name').fill(name)
-  await sheet.getByRole('button', { name: 'Add person' }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect.poll(() => memberNames(page)).toContain(name)
-}
 
 /** Adds an Expense from the Add sheet: the viewer pays and everyone shares. */
 async function addExpense(page: Page, amount: string): Promise<void> {
@@ -302,4 +290,130 @@ test('a claim against a Shadow Member is confirmed by the holder', async ({ brow
 
   await rohanContext.close()
   await miraContext.close()
+})
+
+test("the book keeps folding and settling a person without the app after its holder's key is gone", async ({
+  browser,
+}) => {
+  const rohanContext = await browser.newContext(PHONE)
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  await addShadowMember(rohan, 'Rohit')
+
+  const miraContext = await browser.newContext(PHONE)
+  const mira = await miraContext.newPage()
+  await joinGroup(mira, invite, 'Mira')
+  await expect
+    .poll(async () => (await memberNames(mira)).sort())
+    .toEqual(['Mira', 'Rohan', 'Rohit'])
+
+  // Rohit covered Mira's dinner: she owes him ₹200.
+  const sheet = await openAddSheet(mira)
+
+  await sheet.getByLabel('Amount (₹)').fill('200')
+  await sheet.getByLabel('Paid by').selectOption({ label: 'Rohit' })
+  await sheet.getByRole('checkbox', { name: 'Rohan' }).uncheck()
+  await sheet.getByRole('checkbox', { name: 'Rohit' }).uncheck()
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
+  await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohit ₹200'])
+
+  // Rohan's phone is wiped and Mira marks his device gone. Rohit's id stays
+  // bound to Rohan's key, which now authors nothing more.
+  await rohanContext.close()
+  await memberRow(mira, 'Rohan').getByTestId('archive-member').click()
+  await expect.poll(() => archivedMemberNames(mira)).toEqual(['Rohan'])
+
+  // The shadow keeps folding: still in the active list, still marked, with
+  // its Balance untouched.
+  await expect.poll(async () => (await memberNames(mira)).sort()).toEqual(['Mira', 'Rohit'])
+  await expect(memberRow(mira, 'Rohit')).toContainText('No phone · Added by Rohan')
+  await expect.poll(() => balanceTexts(mira)).toEqual(['You owe Rohit ₹200'])
+
+  // Settling still works: Mira records what she paid.
+  const form = await openSettlementForm(mira)
+
+  await form.getByLabel('Member').selectOption({ label: 'Rohit' })
+  await form.getByLabel('Amount (₹)').fill('200')
+  await form.getByRole('button', { name: 'Add settlement' }).click()
+  await expect.poll(() => balanceTexts(mira)).toEqual([])
+  await expect(mira.getByTestId('entry-list')).toContainText('Mira paid Rohit ₹200')
+
+  // Attestation ended with Rohan's key: the claim keeps its place in the book
+  // and its wait on that frozen key (ADR-0018, ADR-0021), but no Confirm is
+  // offered here, because nobody left holds it.
+  const detail = await openEntrySheet(mira, entryRow(mira, 'settlement'))
+
+  await expect(detail.getByTestId('confirm-settlement')).toHaveCount(0)
+  await expect(detail.getByTestId('settlement-status')).toHaveText('Waiting for Rohan to confirm')
+  await mira.keyboard.press('Escape')
+  await expect(mira.getByRole('dialog')).toHaveCount(0)
+
+  // And it is still archivable like any Member: the marker folds, and the
+  // frozen holder's name stays on the row.
+  await memberRow(mira, 'Rohit').getByTestId('archive-member').click()
+  await expect.poll(() => archivedMemberNames(mira)).toEqual(['Rohan', 'Rohit'])
+  await expect(archivedMemberRow(mira, 'Rohit')).toContainText('No phone · Added by Rohan')
+  await expect(archivedMemberRow(mira, 'Rohit')).toContainText('Archived')
+
+  await miraContext.close()
+})
+
+test('a person who installs the app joins as a new Member while the shadow keeps its history', async ({
+  browser,
+}) => {
+  const rohanContext = await browser.newContext(PHONE)
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  await addShadowMember(rohan, 'Rohit')
+  await addExpense(rohan, '900')
+  await expect.poll(() => balanceTexts(rohan)).toEqual(['Rohit owes You ₹450'])
+
+  // Rohit installs the app and joins through the ordinary invite as a new
+  // Member. There is no link, merge, or handover: the shadow stays as it is
+  // (ADR-0020).
+  const rohitContext = await browser.newContext(PHONE)
+  const rohit = await rohitContext.newPage()
+  await joinGroup(rohit, invite, 'Rohit (app)')
+  await expect
+    .poll(async () => (await memberNames(rohan)).sort())
+    .toEqual(['Rohan', 'Rohit', 'Rohit (app)'].sort())
+
+  // On his own phone the tracked person reads as a separate phone-less Member
+  // held by Rohan, beside his own Membership row.
+  await expect(memberRow(rohit, 'Rohit')).toContainText('No phone · Added by Rohan')
+  await expect(rohit.getByTestId('own-member')).toContainText('Rohit (app)')
+  await expect(rohit.getByTestId('own-member')).toContainText('(you)')
+
+  // Every picker offers both, and the new Member takes part in the book.
+  const sheet = await openAddSheet(rohan)
+
+  await expect(sheet.getByLabel('Paid by').locator('option')).toHaveText([
+    'Rohan (you)',
+    'Rohit',
+    'Rohit (app)',
+  ])
+  await sheet.getByRole('button', { name: 'Close' }).click()
+
+  const second = await openAddSheet(rohan)
+
+  await second.getByLabel('Amount (₹)').fill('100')
+  await second.locator('[data-participant-name="Rohit"] input[type="checkbox"]').uncheck()
+  await second.getByRole('button', { name: 'Add expense' }).click()
+  await expect
+    .poll(async () => (await balanceTexts(rohan)).sort())
+    .toEqual(['Rohit (app) owes You ₹50', 'Rohit owes You ₹450'].sort())
+
+  // The shadow keeps its own history and is still archivable; the real Member
+  // stays active beside it.
+  await memberRow(rohan, 'Rohit').getByTestId('archive-member').click()
+  await expect.poll(() => memberNames(rohan)).toEqual(['Rohan', 'Rohit (app)'])
+  await expect.poll(() => archivedMemberNames(rohan)).toEqual(['Rohit'])
+  await expect
+    .poll(async () => (await balanceTexts(rohan)).sort())
+    .toEqual(['Rohit (app) owes You ₹50', 'Rohit owes You ₹450 · Archived'].sort())
+
+  await rohanContext.close()
+  await rohitContext.close()
 })

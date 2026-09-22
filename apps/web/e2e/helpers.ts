@@ -97,6 +97,19 @@ export async function openAddSheet(page: Page): Promise<Locator> {
   return sheet
 }
 
+/** Adds a person without the app from the Members list and waits for their row. */
+export async function addShadowMember(page: Page, displayName: string): Promise<void> {
+  await page.getByTestId('add-shadow-member').click()
+
+  const sheet = page.getByRole('dialog')
+
+  await expect(sheet).toBeVisible()
+  await sheet.getByLabel('Name').fill(displayName)
+  await sheet.getByRole('button', { name: 'Add person' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect.poll(() => memberNames(page)).toContain(displayName)
+}
+
 /** Opens the Add bottom sheet on its Loan form and returns the sheet. */
 export async function openLoanForm(page: Page): Promise<Locator> {
   const sheet = await openAddSheet(page)

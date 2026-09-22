@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { foldBalances } from '../src/group/balances'
 import { createSettlementEntry } from '../src/group/settlements'
 import { createVoidEntry } from '../src/group/voids'
+import { uuidv7 } from '../src/uuidv7'
 import { makeDevice, makeEntry, makeExpenseEntry, type TestDevice } from './helpers/entries'
 
 /** Writes a Settlement as `device`, defaulting the payer to the device itself. */
@@ -294,6 +295,33 @@ describe('foldBalances', () => {
     const expected = [
       {
         debtorDeviceId: mira.deviceId,
+        creditorDeviceId: rohan.deviceId,
+        amountPaise: Number.MAX_SAFE_INTEGER,
+      },
+    ]
+
+    expect(foldBalances(entries)).toEqual(expected)
+    expect(foldBalances([...entries].reverse())).toEqual(expected)
+  })
+
+  it('saturates an absurd net between a Member and their person with no phone', async () => {
+    const rohan = await makeDevice()
+    const rohitId = uuidv7()
+    // The same crafted pair, with one side a Shadow Member: the fold treats
+    // the id like any other, so the pair saturates rather than blanking.
+    const entries = [
+      await makeExpenseEntry(rohan, {
+        amountPaise: Number.MAX_SAFE_INTEGER,
+        participantDeviceIds: [rohitId],
+      }),
+      await makeExpenseEntry(rohan, {
+        amountPaise: Number.MAX_SAFE_INTEGER,
+        participantDeviceIds: [rohitId],
+      }),
+    ]
+    const expected = [
+      {
+        debtorDeviceId: rohitId,
         creditorDeviceId: rohan.deviceId,
         amountPaise: Number.MAX_SAFE_INTEGER,
       },

@@ -1,5 +1,6 @@
 import { type BrowserContext, expect, type Page, test } from '@playwright/test'
 import {
+  addShadowMember,
   balanceTexts,
   createGroup,
   type InvitePayload,
@@ -22,6 +23,39 @@ function storedIdentity(page: Page): Promise<StoredIdentity> {
   return page.evaluate(
     () => JSON.parse(localStorage.getItem('bakihai/identity') ?? 'null') as StoredIdentity,
   )
+}
+
+/** The device id of a Member, read from the harness's copy of the book. */
+async function memberDeviceId(harness: Page, displayName: string): Promise<string> {
+  const isInBook = () =>
+    harness.evaluate(
+      (name) =>
+        (
+          window.harness.entryValues() as {
+            type?: string
+            payload?: { displayName?: string }
+          }[]
+        ).some((value) => value.type === 'member' && value.payload?.displayName === name),
+      displayName,
+    )
+
+  await expect.poll(isInBook).toBe(true)
+
+  return harness.evaluate((name) => {
+    const claim = (
+      window.harness.entryValues() as {
+        authorDeviceId?: string
+        type?: string
+        payload?: { displayName?: string }
+      }[]
+    ).find((value) => value.type === 'member' && value.payload?.displayName === name)
+
+    if (!claim?.authorDeviceId) {
+      throw new Error(`${name}'s Member Entry is not in the book`)
+    }
+
+    return claim.authorDeviceId
+  }, displayName)
 }
 
 async function openHarness(context: BrowserContext, invite: InvitePayload): Promise<Page> {
@@ -483,4 +517,235 @@ test('a legacy PKCS8 key moves into IndexedDB on first use', async ({ page }) =>
   await sheet.getByRole('checkbox', { name: 'Legacy' }).uncheck()
   await sheet.getByRole('button', { name: 'Add expense' }).click()
   await expect(page.getByTestId('entry-list').locator('li')).toHaveCount(1)
+})
+
+test('a forged Shadow Member claim and a forged Entry as the shadow never reach a phone', async ({
+  browser,
+}) => {
+  const rohanContext = await browser.newContext()
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  await addShadowMember(rohan, 'Rohit')
+
+  const miraContext = await browser.newContext()
+  const mira = await miraContext.newPage()
+  await joinGroup(mira, invite, 'Mira')
+  await expect
+    .poll(async () => (await memberNames(mira)).sort())
+    .toEqual(['Mira', 'Rohan', 'Rohit'])
+
+  const rohanIdentity = await storedIdentity(rohan)
+  const harness = await openHarness(rohanContext, invitePayload(invite))
+  const rohitId = await memberDeviceId(harness, 'Rohit')
+
+  // Three forged shapes from a modified client: writing as the shadow under a
+  // fresh key, claiming the shadow's id to rebind it, and writing from a
+  // device id no Member Entry bound at all.
+  const forgedAsShadow = await harness.evaluate(
+    ({ shadowDeviceId, participantDeviceId }) =>
+      window.harness.addForgedEntry({
+        authorDeviceId: shadowDeviceId,
+        type: 'expense',
+        payload: {
+          amountPaise: 999_900,
+          payerDeviceId: shadowDeviceId,
+          participantDeviceIds: [participantDeviceId],
+        },
+      }),
+    { shadowDeviceId: rohitId, participantDeviceId: rohanIdentity.deviceId },
+  )
+  const forgedRebind = await harness.evaluate(
+    (shadowDeviceId) =>
+      window.harness.addForgedEntry({
+        authorDeviceId: shadowDeviceId,
+        type: 'member',
+        payload: { displayName: 'Not Rohit' },
+      }),
+    rohitId,
+  )
+  const forgedGhost = await harness.evaluate(
+    (participantDeviceId) =>
+      window.harness.addForgedEntry({
+        authorDeviceId: window.harness.newId(),
+        type: 'expense',
+        payload: {
+          amountPaise: 500_000,
+          payerDeviceId: window.harness.newId(),
+          participantDeviceIds: [participantDeviceId],
+        },
+      }),
+    rohanIdentity.deviceId,
+  )
+
+  // The harness then joins as a Member and records an honest Expense naming
+  // the shadow, so seeing that on Mira's screen proves the forgeries arrived
+  // and were read without breaking anything.
+  await harness.evaluate(() => window.harness.joinAs('Seed'))
+  await expect
+    .poll(async () => (await memberNames(mira)).sort())
+    .toEqual(['Mira', 'Rohan', 'Rohit', 'Seed'])
+  await harness.evaluate(
+    (shadowDeviceId) =>
+      window.harness.addSignedEntry({
+        type: 'expense',
+        payload: {
+          amountPaise: 20_000,
+          payerDeviceId: window.harness.deviceId(),
+          participantDeviceIds: [shadowDeviceId],
+        },
+      }),
+    rohitId,
+  )
+  await expect.poll(() => balanceTexts(mira)).toEqual(['Rohit owes Seed ₹200'])
+
+  // Both phones read the same clean book: the shadow keeps its name and its
+  // binding, the forged lines are nowhere, and nothing raised an alert.
+  for (const page of [rohan, mira]) {
+    await expect
+      .poll(async () => (await memberNames(page)).sort())
+      .toEqual(['Mira', 'Rohan', 'Rohit', 'Seed'])
+    await expect(page.locator(`[data-entry-id="${forgedAsShadow}"]`)).toHaveCount(0)
+    await expect(page.locator(`[data-entry-id="${forgedRebind}"]`)).toHaveCount(0)
+    await expect(page.locator(`[data-entry-id="${forgedGhost}"]`)).toHaveCount(0)
+    await expect(page.locator('body')).not.toContainText('Not Rohit')
+    await expect(page.locator('body')).not.toContainText('₹9999')
+    await expect.poll(() => balanceTexts(page)).toEqual(['Rohit owes Seed ₹200'])
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  }
+
+  await rohanContext.close()
+  await miraContext.close()
+})
+
+test('absurd Entries naming a person without the app never blank a phone', async ({ browser }) => {
+  const rohanContext = await browser.newContext()
+  const rohan = await rohanContext.newPage()
+  const invite = await createGroup(rohan, 'Flat 3B', 'Rohan')
+
+  await addShadowMember(rohan, 'Rohit')
+
+  const miraContext = await browser.newContext()
+  const mira = await miraContext.newPage()
+  await joinGroup(mira, invite, 'Mira')
+  await expect
+    .poll(async () => (await memberNames(mira)).sort())
+    .toEqual(['Mira', 'Rohan', 'Rohit'])
+
+  const harness = await openHarness(rohanContext, invitePayload(invite))
+  const rohitId = await memberDeviceId(harness, 'Rohit')
+
+  await harness.evaluate(() => window.harness.joinAs('Seed'))
+  await expect
+    .poll(async () => (await memberNames(mira)).sort())
+    .toEqual(['Mira', 'Rohan', 'Rohit', 'Seed'])
+
+  // A type this version does not know, naming the shadow, is ignored by the
+  // arithmetic whatever its payload claims.
+  await harness.evaluate(
+    (shadowDeviceId) =>
+      window.harness.addSignedEntry({
+        type: 'treat',
+        payload: { note: 'chai', amountPaise: 1, participantDeviceIds: [shadowDeviceId] },
+      }),
+    rohitId,
+  )
+
+  // Two absurd Expenses paid by Seed for Rohit: each amount is valid on its
+  // own, but their sum leaves the range where integer arithmetic is exact.
+  for (let index = 0; index < 2; index++) {
+    await harness.evaluate(
+      (shadowDeviceId) =>
+        window.harness.addSignedEntry({
+          type: 'expense',
+          payload: {
+            amountPaise: Number.MAX_SAFE_INTEGER,
+            payerDeviceId: window.harness.deviceId(),
+            participantDeviceIds: [shadowDeviceId],
+          },
+        }),
+      rohitId,
+    )
+  }
+
+  // The same for an item Loan and two absurd Returns against it.
+  const loanId = await harness.evaluate(
+    (shadowDeviceId) =>
+      window.harness.addSignedEntry({
+        type: 'loan',
+        payload: {
+          itemLabel: 'rice',
+          quantityHundredths: 300,
+          lenderDeviceId: window.harness.deviceId(),
+          borrowerDeviceId: shadowDeviceId,
+        },
+      }),
+    rohitId,
+  )
+
+  for (let index = 0; index < 2; index++) {
+    await harness.evaluate(
+      (loanEntryId) =>
+        window.harness.addSignedEntry({
+          type: 'return',
+          payload: { loanEntryId, quantityHundredths: Number.MAX_SAFE_INTEGER },
+        }),
+      loanId,
+    )
+  }
+
+  // A Settlement naming a ghost id no Member holds is not this Group's
+  // business: it stays in the ledger but never in the waiting count. A claim
+  // against the shadow is: its holder can still attest, so it waits.
+  const rohanIdentity = await storedIdentity(rohan)
+
+  await harness.evaluate(
+    (fromDeviceId) =>
+      window.harness.addSignedEntry({
+        type: 'settlement',
+        payload: {
+          fromDeviceId,
+          toDeviceId: window.harness.newId(),
+          amountPaise: 12_000,
+        },
+      }),
+    rohanIdentity.deviceId,
+  )
+  await harness.evaluate(
+    (shadowDeviceId) =>
+      window.harness.addSignedEntry({
+        type: 'settlement',
+        payload: {
+          fromDeviceId: window.harness.deviceId(),
+          toDeviceId: shadowDeviceId,
+          amountPaise: 10_000,
+        },
+      }),
+    rohitId,
+  )
+
+  // The saturated Balance and the over-returned Loan both read, the shadow's
+  // claim is the only wait — the ghost added none — and nothing blanked.
+  await expect.poll(() => balanceTexts(mira)).toEqual(['Rohit owes Seed ₹90071992547409.91'])
+  await expect(mira.locator(`[data-entry-id="${loanId}"]`)).toContainText('over-returned by')
+  await expect(mira.getByTestId('entry-list')).toContainText('Rohan paid Someone ₹120')
+  await expect(mira.getByTestId('entry-list')).toContainText('Seed paid Rohit ₹100')
+  await expect(mira.getByTestId('waiting-count')).toHaveText(
+    '1 Settlement waiting for confirmation',
+  )
+  await expect(mira.getByRole('alert')).toHaveCount(0)
+
+  // The honest phone keeps working: a new Expense still writes and folds.
+  const sheet = await openAddSheet(rohan)
+
+  await sheet.getByLabel('Amount (₹)').fill('100')
+  await sheet.getByRole('checkbox', { name: 'Mira' }).uncheck()
+  await sheet.getByRole('checkbox', { name: 'Seed' }).uncheck()
+  await sheet.getByRole('button', { name: 'Add expense' }).click()
+  await expect(rohan.getByTestId('entry-list')).toContainText('Rohan paid ₹100')
+  await expect.poll(() => balanceTexts(rohan)).toContain('Rohit owes You ₹50')
+  await expect(rohan.getByRole('alert')).toHaveCount(0)
+
+  await rohanContext.close()
+  await miraContext.close()
 })
