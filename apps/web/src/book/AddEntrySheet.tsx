@@ -70,7 +70,7 @@ export function AddEntrySheet({
           dialogRef.current.close()
         }
       }}
-      className="fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none bg-transparent p-0 backdrop:bg-black/40"
+      className="fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none bg-transparent p-0 text-foreground backdrop:bg-black/40"
     >
       <div
         data-testid="add-sheet-panel"

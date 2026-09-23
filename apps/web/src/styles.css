@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  /* Lets UA-defaulted colors (dialog text, placeholders, selects, scrollbars)
+     follow the OS theme instead of staying on the light scheme. */
+  color-scheme: light dark;
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.16 0.02 260);
   --muted-foreground: oklch(0.45 0.02 260);
